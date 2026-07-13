@@ -24,12 +24,19 @@ def test_finalize_single_query_runs_cleanup_without_reemitting_finalize_before_r
         lambda _cli: calls.append(("finalize", {})),
     )
     monkeypatch.setattr(cli, "_run_cleanup", cleanup)
+    monkeypatch.setattr(
+        cli,
+        "_close_single_query_state",
+        lambda _cli: calls.append(("close", {})),
+        raising=False,
+    )
 
     cli._finalize_single_query(fake_cli)
 
     assert calls == [
         ("finalize", {}),
         ("cleanup", {"notify_session_finalize": False}),
+        ("close", {}),
         ("release", {}),
     ]
 
@@ -48,11 +55,17 @@ def test_finalize_single_query_releases_session_when_cleanup_fails(monkeypatch):
         lambda _cli: calls.append("finalize"),
     )
     monkeypatch.setattr(cli, "_run_cleanup", cleanup)
+    monkeypatch.setattr(
+        cli,
+        "_close_single_query_state",
+        lambda _cli: calls.append("close"),
+        raising=False,
+    )
 
     with pytest.raises(RuntimeError, match="cleanup failed"):
         cli._finalize_single_query(fake_cli)
 
-    assert calls == ["finalize", "cleanup", "release"]
+    assert calls == ["finalize", "cleanup", "close", "release"]
 
 
 def test_finalize_single_query_runs_cleanup_when_finalize_hook_fails(monkeypatch):
@@ -70,10 +83,16 @@ def test_finalize_single_query_runs_cleanup_when_finalize_hook_fails(monkeypatch
 
     monkeypatch.setattr("hermes_cli.plugins.invoke_hook", invoke_hook)
     monkeypatch.setattr(cli, "_run_cleanup", lambda **kwargs: calls.append("cleanup"))
+    monkeypatch.setattr(
+        cli,
+        "_close_single_query_state",
+        lambda _cli: calls.append("close"),
+        raising=False,
+    )
 
     cli._finalize_single_query(fake_cli)
 
-    assert calls == ["finalize", "cleanup", "release"]
+    assert calls == ["finalize", "cleanup", "close", "release"]
 
 
 def test_finalize_single_query_signal_window_does_not_reemit_during_atexit(monkeypatch):
@@ -103,11 +122,17 @@ def test_finalize_single_query_signal_window_does_not_reemit_during_atexit(monke
     original_run_cleanup = cli._run_cleanup
     monkeypatch.setattr("hermes_cli.plugins.invoke_hook", invoke_hook)
     monkeypatch.setattr(cli, "_run_cleanup", interrupted_cleanup)
+    monkeypatch.setattr(
+        cli,
+        "_close_single_query_state",
+        lambda _cli: calls.append(("close", {})),
+        raising=False,
+    )
 
     with pytest.raises(KeyboardInterrupt):
         cli._finalize_single_query(fake_cli)
 
-    assert calls == [expected_finalize, ("release", {})]
+    assert calls == [expected_finalize, ("close", {}), ("release", {})]
 
     # Simulate later atexit cleanup after the interrupted one-shot path. The
     # active agent may already be unavailable by then.
@@ -121,7 +146,67 @@ def test_finalize_single_query_signal_window_does_not_reemit_during_atexit(monke
 
     cli._run_cleanup()
 
-    assert calls == [expected_finalize, ("release", {})]
+    assert calls == [expected_finalize, ("close", {}), ("release", {})]
+
+
+def test_close_single_query_state_closes_db_session_agent_and_db_in_order():
+    calls = []
+
+    class FakeDB:
+        def end_session(self, session_id, reason):
+            calls.append(("end_session", session_id, reason))
+
+        def close(self):
+            calls.append(("db_close",))
+
+    class FakeAgent:
+        session_id = "agent-session"
+
+        def close(self):
+            calls.append(("agent_close",))
+
+    fake_cli = SimpleNamespace(
+        agent=FakeAgent(),
+        session_id="cli-session",
+        _session_db=FakeDB(),
+    )
+
+    cli._close_single_query_state(fake_cli)
+
+    assert calls == [
+        ("end_session", "agent-session", "cli_close"),
+        ("agent_close",),
+        ("db_close",),
+    ]
+
+
+def test_close_single_query_state_guards_each_cleanup_independently():
+    calls = []
+
+    class FakeDB:
+        def end_session(self, session_id, reason):
+            calls.append(("end_session", session_id, reason))
+            raise RuntimeError("end failed")
+
+        def close(self):
+            calls.append(("db_close",))
+
+    class FakeAgent:
+        session_id = "agent-session"
+
+        def close(self):
+            calls.append(("agent_close",))
+            raise RuntimeError("agent close failed")
+
+    cli._close_single_query_state(
+        SimpleNamespace(agent=FakeAgent(), session_id="cli-session", _session_db=FakeDB())
+    )
+
+    assert calls == [
+        ("end_session", "agent-session", "cli_close"),
+        ("agent_close",),
+        ("db_close",),
+    ]
 
 
 def test_notify_single_query_session_finalize_uses_agent_session(monkeypatch):

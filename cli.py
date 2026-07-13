@@ -1104,11 +1104,49 @@ def _notify_single_query_session_finalize(cli, *, reason: str = "shutdown") -> N
         _single_query_finalize_attempted_session_ids.add(session_id)
 
 
+def _close_single_query_state(cli) -> None:
+    """Best-effort close for resources owned by a non-interactive CLI run.
+
+    ``_run_cleanup`` operates through the module-level active-agent reference,
+    which is not guaranteed to be populated by every ``-q`` initialization
+    path.  Close the concrete CLI state as well, keeping every operation
+    independent so one broken provider or SQLite handle cannot skip the rest.
+    """
+    agent = getattr(cli, "agent", None)
+    session_id = getattr(agent, "session_id", None) or getattr(cli, "session_id", None)
+    session_db = getattr(cli, "_session_db", None)
+    if session_db is None and agent is not None:
+        session_db = getattr(agent, "_session_db", None)
+
+    if session_db is not None and session_id:
+        try:
+            session_db.end_session(session_id, "cli_close")
+        except (Exception, KeyboardInterrupt) as exc:
+            logger.debug("Could not close single-query session in DB: %s", exc)
+
+    if agent is not None:
+        try:
+            agent.close()
+        except (Exception, KeyboardInterrupt) as exc:
+            logger.debug("Could not close single-query agent: %s", exc)
+
+    if session_db is not None:
+        try:
+            session_db.close()
+        except (Exception, KeyboardInterrupt) as exc:
+            logger.debug("Could not close single-query session DB: %s", exc)
+
+
 def _finalize_single_query(cli) -> None:
     """Close one-shot CLI resources before releasing the active session lease."""
     try:
-        _notify_single_query_session_finalize(cli)
-        _run_cleanup(notify_session_finalize=False)
+        try:
+            _notify_single_query_session_finalize(cli)
+        finally:
+            try:
+                _run_cleanup(notify_session_finalize=False)
+            finally:
+                _close_single_query_state(cli)
     finally:
         cli._release_active_session()
 

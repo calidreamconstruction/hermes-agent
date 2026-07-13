@@ -61,6 +61,7 @@ class GatewayRuntimeSnapshot:
     service_running: bool = False
     gateway_pids: tuple[int, ...] = ()
     service_scope: str | None = None
+    service_unit: str | None = None
 
     @property
     def running(self) -> bool:
@@ -762,6 +763,86 @@ def _probe_systemd_service_running(system: bool = False) -> tuple[bool, bool]:
     return selected_system, result.stdout.strip() == "active"
 
 
+def _systemd_service_unit_from_pid_cgroup(
+    pid: int, *, proc_root: Path = Path("/proc")
+) -> str | None:
+    """Return the systemd ``.service`` unit owning *pid*, if cgroups expose it."""
+    try:
+        cgroup_text = (proc_root / str(pid) / "cgroup").read_text(
+            encoding="utf-8", errors="replace"
+        )
+    except (OSError, ValueError):
+        return None
+
+    for line in cgroup_text.splitlines():
+        cgroup_path = line.rsplit(":", 1)[-1]
+        for component in reversed(Path(cgroup_path).parts):
+            if component.endswith(".service") and component not in {".service", "..service"}:
+                return component
+    return None
+
+
+def _verify_systemd_service_owner(unit: str, pid: int) -> str | None:
+    """Return ``user``/``system`` only when *unit* actively owns exactly *pid*.
+
+    A cgroup string alone is not authority: stale cgroups and reused PIDs are
+    possible.  ``systemctl show`` must independently report both an active unit
+    and an exact ``MainPID`` match.  This function is discovery-only; service
+    management continues to target Hermes' canonical gateway unit.
+    """
+    if not unit.endswith(".service") or "/" in unit or "\\" in unit or pid <= 0:
+        return None
+
+    args = [
+        "show",
+        unit,
+        "--no-pager",
+        "--property",
+        "ActiveState",
+        "--property",
+        "MainPID",
+    ]
+    for system in (False, True):
+        try:
+            result = _run_systemctl(
+                args,
+                system=system,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (RuntimeError, subprocess.TimeoutExpired, OSError):
+            continue
+        if result.returncode != 0:
+            continue
+        props: dict[str, str] = {}
+        for line in result.stdout.splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                props[key] = value
+        try:
+            main_pid = int(props.get("MainPID", "0"))
+        except ValueError:
+            main_pid = 0
+        if props.get("ActiveState") == "active" and main_pid == pid:
+            return "system" if system else "user"
+    return None
+
+
+def _discover_systemd_service_owner(
+    gateway_pids: tuple[int, ...] | list[int],
+) -> tuple[str, str] | None:
+    """Find a verified systemd owner for an already-identified gateway PID."""
+    for pid in gateway_pids:
+        unit = _systemd_service_unit_from_pid_cgroup(pid)
+        if unit is None:
+            continue
+        scope = _verify_systemd_service_owner(unit, pid)
+        if scope is not None:
+            return unit, scope
+    return None
+
+
 def _read_systemd_unit_environment(system: bool = False) -> dict[str, str]:
     """Parse the gateway unit's ``Environment=`` directives.
 
@@ -1120,6 +1201,7 @@ def get_gateway_runtime_snapshot(system: bool = False) -> GatewayRuntimeSnapshot
                     service_running=service_running,
                     gateway_pids=gateway_pids,
                     service_scope="s6",
+                    service_unit=service_name,
                 )
         except Exception:
             pass  # Fall through to the legacy label on any detection error.
@@ -1131,12 +1213,22 @@ def get_gateway_runtime_snapshot(system: bool = False) -> GatewayRuntimeSnapshot
     if supports_systemd_services():
         selected_system, service_running = _probe_systemd_service_running(system=system)
         scope_label = _service_scope_label(selected_system)
+        service_unit = get_service_name()
+        service_installed = get_systemd_unit_path(system=selected_system).exists()
+        if not service_running:
+            discovered_owner = _discover_systemd_service_owner(gateway_pids)
+            if discovered_owner is not None:
+                service_unit, scope_label = discovered_owner
+                selected_system = scope_label == "system"
+                service_installed = True
+                service_running = True
         return GatewayRuntimeSnapshot(
             manager=f"systemd ({scope_label})",
-            service_installed=get_systemd_unit_path(system=selected_system).exists(),
+            service_installed=service_installed,
             service_running=service_running,
             gateway_pids=gateway_pids,
             service_scope=scope_label,
+            service_unit=service_unit,
         )
 
     if is_macos():
@@ -6998,7 +7090,30 @@ def _gateway_command_inner(args):
             from hermes_cli import gateway_windows
 
             _windows_service_installed = gateway_windows.is_installed()
-        if supports_systemd_services() and (
+        if (
+            snapshot.service_running
+            and snapshot.service_unit
+            and snapshot.service_unit != get_service_name()
+            and snapshot.service_scope in {"user", "system"}
+        ):
+            # Some deployments intentionally supervise Hermes with a wrapper
+            # unit (for example ``hermes-agent.service``) instead of the
+            # package's canonical ``hermes-gateway.service``. Report the
+            # verified owner accurately, but never feed this discovered name
+            # into start/stop/restart operations.
+            print(f"✓ Gateway is running under {snapshot.manager}")
+            print(f"  Service unit: {snapshot.service_unit}")
+            if snapshot.gateway_pids:
+                print(
+                    f"  PID(s): {_format_gateway_pids(snapshot.gateway_pids, limit=None)}"
+                )
+            runtime_lines = _runtime_health_lines()
+            if runtime_lines:
+                print()
+                print("Recent gateway health:")
+                for line in runtime_lines:
+                    print(f"  {line}")
+        elif supports_systemd_services() and (
             get_systemd_unit_path(system=False).exists()
             or get_systemd_unit_path(system=True).exists()
         ):

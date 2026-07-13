@@ -242,6 +242,45 @@ def _create_session_db_for_oneshot():
         return None
 
 
+def _finalize_oneshot_agent(agent, session_db, *, end_reason: str) -> None:
+    """Close one-shot state without allowing cleanup to replace its result.
+
+    The ordering mirrors the interactive shutdown contract: persist memory
+    while the message list is still available, mark the SQLite session ended,
+    then close the agent and finally the DB handle.  Each step is deliberately
+    guarded on its own so a provider cleanup failure cannot leave later
+    resources open or mask the original response/exception.
+    """
+    if agent is not None:
+        try:
+            session_messages = getattr(agent, "_session_messages", None)
+            if isinstance(session_messages, list):
+                agent.shutdown_memory_provider(session_messages)
+            else:
+                agent.shutdown_memory_provider()
+        except BaseException as exc:  # noqa: BLE001 - cleanup must not replace result
+            logging.debug("Could not shut down oneshot memory provider: %s", exc)
+
+    session_id = getattr(agent, "session_id", None) if agent is not None else None
+    if session_db is not None and session_id:
+        try:
+            session_db.end_session(session_id, end_reason)
+        except BaseException as exc:  # noqa: BLE001 - cleanup must not replace result
+            logging.debug("Could not end oneshot session in DB: %s", exc)
+
+    if agent is not None:
+        try:
+            agent.close()
+        except BaseException as exc:  # noqa: BLE001 - cleanup must not replace result
+            logging.debug("Could not close oneshot agent: %s", exc)
+
+    if session_db is not None:
+        try:
+            session_db.close()
+        except BaseException as exc:  # noqa: BLE001 - cleanup must not replace result
+            logging.debug("Could not close oneshot session DB: %s", exc)
+
+
 def _run_agent(
     prompt: str,
     model: Optional[str] = None,
@@ -332,39 +371,46 @@ def _run_agent(
     # honour the same merge semantics as interactive CLI and gateway sessions.
     _fb = get_fallback_chain(cfg)
 
-    agent = AIAgent(
-        api_key=runtime.get("api_key"),
-        base_url=runtime.get("base_url"),
-        provider=runtime.get("provider"),
-        api_mode=runtime.get("api_mode"),
-        model=effective_model,
-        enabled_toolsets=toolsets_list,
-        quiet_mode=True,
-        platform="cli",
-        session_db=session_db,
-        credential_pool=runtime.get("credential_pool"),
-        fallback_model=_fb or None,
-        # Interactive callbacks are intentionally NOT wired beyond this
-        # one.  In oneshot mode there's no user sitting at a terminal:
-        #   - clarify  → returns a synthetic "pick a default" instruction
-        #                so the agent continues instead of stalling on
-        #                the tool's built-in "not available" error
-        #   - sudo password prompt → terminal_tool gates on
-        #                HERMES_INTERACTIVE which we never set
-        #   - shell-hook approval → auto-approved via HERMES_ACCEPT_HOOKS=1
-        #                (set above); also falls back to deny on non-tty
-        #   - dangerous-command approval → bypassed via HERMES_YOLO_MODE=1
-        #   - skill secret capture → returns gracefully when no callback set
-        clarify_callback=_oneshot_clarify_callback,
-    )
+    agent = None
+    end_reason = "oneshot_failed"
+    try:
+        agent = AIAgent(
+            api_key=runtime.get("api_key"),
+            base_url=runtime.get("base_url"),
+            provider=runtime.get("provider"),
+            api_mode=runtime.get("api_mode"),
+            model=effective_model,
+            enabled_toolsets=toolsets_list,
+            quiet_mode=True,
+            platform="cli",
+            session_db=session_db,
+            credential_pool=runtime.get("credential_pool"),
+            fallback_model=_fb or None,
+            # Interactive callbacks are intentionally NOT wired beyond this
+            # one.  In oneshot mode there's no user sitting at a terminal:
+            #   - clarify  → returns a synthetic "pick a default" instruction
+            #                so the agent continues instead of stalling on
+            #                the tool's built-in "not available" error
+            #   - sudo password prompt → terminal_tool gates on
+            #                HERMES_INTERACTIVE which we never set
+            #   - shell-hook approval → auto-approved via HERMES_ACCEPT_HOOKS=1
+            #                (set above); also falls back to deny on non-tty
+            #   - dangerous-command approval → bypassed via HERMES_YOLO_MODE=1
+            #   - skill secret capture → returns gracefully when no callback set
+            clarify_callback=_oneshot_clarify_callback,
+        )
 
-    # Belt-and-braces: make sure AIAgent doesn't invoke any streaming
-    # display callbacks that would bypass our stdout capture.
-    agent.suppress_status_output = True
-    agent.stream_delta_callback = None
-    agent.tool_gen_callback = None
+        # Belt-and-braces: make sure AIAgent doesn't invoke any streaming
+        # display callbacks that would bypass our stdout capture.
+        agent.suppress_status_output = True
+        agent.stream_delta_callback = None
+        agent.tool_gen_callback = None
 
-    return agent.chat(prompt) or ""
+        response = agent.chat(prompt) or ""
+        end_reason = "oneshot_complete"
+        return response
+    finally:
+        _finalize_oneshot_agent(agent, session_db, end_reason=end_reason)
 
 
 def _oneshot_clarify_callback(question: str, choices=None) -> str:

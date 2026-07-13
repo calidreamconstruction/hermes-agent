@@ -279,6 +279,160 @@ def test_s6_runtime_snapshot_reports_supervised_service(monkeypatch, tmp_path):
     assert snapshot.gateway_pids == (123,)
 
 
+def test_systemd_service_unit_from_pid_cgroup_reads_service_owner(tmp_path):
+    proc_root = tmp_path / "proc"
+    cgroup = proc_root / "321" / "cgroup"
+    cgroup.parent.mkdir(parents=True)
+    cgroup.write_text(
+        "0::/system.slice/hermes-agent.service\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        gateway._systemd_service_unit_from_pid_cgroup(321, proc_root=proc_root)
+        == "hermes-agent.service"
+    )
+
+
+def test_verify_systemd_service_owner_requires_active_state_and_exact_main_pid(monkeypatch):
+    calls = []
+
+    def fake_run_systemctl(args, *, system=False, **_kwargs):
+        calls.append((tuple(args), system))
+        if system:
+            stdout = "ActiveState=active\nMainPID=321\n"
+        else:
+            stdout = "ActiveState=active\nMainPID=999\n"
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(gateway, "_run_systemctl", fake_run_systemctl)
+
+    assert gateway._verify_systemd_service_owner("hermes-agent.service", 321) == "system"
+    assert calls == [
+        (
+            (
+                "show",
+                "hermes-agent.service",
+                "--no-pager",
+                "--property",
+                "ActiveState",
+                "--property",
+                "MainPID",
+            ),
+            False,
+        ),
+        (
+            (
+                "show",
+                "hermes-agent.service",
+                "--no-pager",
+                "--property",
+                "ActiveState",
+                "--property",
+                "MainPID",
+            ),
+            True,
+        ),
+    ]
+
+
+def test_runtime_snapshot_falls_back_to_verified_cgroup_owner_when_canonical_inactive(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(gateway, "find_gateway_pids", lambda: [321])
+    monkeypatch.setattr(gateway, "is_termux", lambda: False)
+    monkeypatch.setattr(gateway, "is_linux", lambda: True)
+    monkeypatch.setattr("hermes_constants.is_container", lambda: False)
+    monkeypatch.setattr(gateway, "supports_systemd_services", lambda: True)
+    monkeypatch.setattr(gateway, "_probe_systemd_service_running", lambda system=False: (False, False))
+    monkeypatch.setattr(
+        gateway,
+        "_discover_systemd_service_owner",
+        lambda pids: ("hermes-agent.service", "system"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        gateway,
+        "get_systemd_unit_path",
+        lambda system=False: tmp_path / ("system" if system else "user") / "hermes-gateway.service",
+    )
+
+    snapshot = gateway.get_gateway_runtime_snapshot()
+
+    assert snapshot.manager == "systemd (system)"
+    assert snapshot.service_installed is True
+    assert snapshot.service_running is True
+    assert snapshot.service_scope == "system"
+    assert snapshot.service_unit == "hermes-agent.service"
+    assert snapshot.gateway_pids == (321,)
+
+
+def test_runtime_snapshot_does_not_discover_arbitrary_unit_when_canonical_active(
+    monkeypatch, tmp_path
+):
+    canonical = tmp_path / "hermes-gateway.service"
+    canonical.write_text("[Service]\n", encoding="utf-8")
+    monkeypatch.setattr(gateway, "find_gateway_pids", lambda: [321])
+    monkeypatch.setattr(gateway, "is_termux", lambda: False)
+    monkeypatch.setattr(gateway, "is_linux", lambda: True)
+    monkeypatch.setattr("hermes_constants.is_container", lambda: False)
+    monkeypatch.setattr(gateway, "supports_systemd_services", lambda: True)
+    monkeypatch.setattr(gateway, "_probe_systemd_service_running", lambda system=False: (True, True))
+    monkeypatch.setattr(gateway, "get_systemd_unit_path", lambda system=False: canonical)
+    monkeypatch.setattr(
+        gateway,
+        "_discover_systemd_service_owner",
+        lambda _pids: pytest.fail("canonical active unit must win"),
+        raising=False,
+    )
+
+    snapshot = gateway.get_gateway_runtime_snapshot()
+
+    assert snapshot.manager == "systemd (system)"
+    assert snapshot.service_unit == gateway.get_service_name()
+
+
+def test_gateway_status_reports_verified_noncanonical_systemd_owner(monkeypatch, tmp_path, capsys):
+    snapshot = gateway.GatewayRuntimeSnapshot(
+        manager="systemd (system)",
+        service_installed=True,
+        service_running=True,
+        gateway_pids=(321,),
+        service_scope="system",
+        service_unit="hermes-agent.service",
+    )
+    monkeypatch.setattr(gateway, "get_gateway_runtime_snapshot", lambda system=False: snapshot)
+    monkeypatch.setattr(gateway, "supports_systemd_services", lambda: True)
+    user_unit = tmp_path / "user" / "hermes-gateway.service"
+    system_unit = tmp_path / "system" / "hermes-gateway.service"
+    system_unit.parent.mkdir(parents=True)
+    system_unit.write_text("[Service]\n", encoding="utf-8")
+    monkeypatch.setattr(
+        gateway,
+        "get_systemd_unit_path",
+        lambda system=False: system_unit if system else user_unit,
+    )
+    monkeypatch.setattr(
+        gateway,
+        "systemd_status",
+        lambda *_a, **_k: pytest.fail("inactive canonical unit must not hide verified owner"),
+    )
+    monkeypatch.setattr(gateway, "is_windows", lambda: False)
+    monkeypatch.setattr(gateway, "is_macos", lambda: False)
+    monkeypatch.setattr(gateway, "_runtime_health_lines", lambda: [])
+    monkeypatch.setattr(gateway, "_print_other_profiles_gateway_status", lambda: None)
+
+    gateway.gateway_command(
+        SimpleNamespace(gateway_command="status", deep=False, full=False, system=False)
+    )
+
+    out = capsys.readouterr().out
+    assert "Gateway is running under systemd (system)" in out
+    assert "Service unit: hermes-agent.service" in out
+    assert "PID(s): 321" in out
+    assert "Running manually" not in out
+
+
 def test_running_under_gateway_supervisor_markers(monkeypatch):
     _clear_supervisor_markers(monkeypatch)
     assert gateway._running_under_gateway_supervisor() is False
