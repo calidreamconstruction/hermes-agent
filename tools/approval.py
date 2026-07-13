@@ -490,6 +490,25 @@ DANGEROUS_PATTERNS = [
     (r'\b(python[23]?|perl|ruby|node)\s+<<', "script execution via heredoc"),
     # Git destructive operations that can lose uncommitted work or rewrite
     # shared history. Not captured by rm/chmod/etc patterns.
+    # Production publishers and broad Git mutations are high-capability
+    # operations, not blanket-denied operations. Mark them dangerous so an
+    # interactive owner can approve a reasoned deployment while unattended
+    # cron cannot silently publish or sweep unrelated dirty work.
+    (
+        r'\b(?:npx\s+)?wrangler(?:@[^\s]+)?\s+(?:pages\s+deploy|deploy)(?:\s|$)',
+        "direct Cloudflare production deployment",
+    ),
+    (r'\bfirebase\s+deploy(?:\s|$)', "direct Firebase production deployment"),
+    (
+        # Detection normalizes commands to lowercase, so -A arrives as -a.
+        r'\bgit\s+add\s+(?:-[^\s]*a[^\s]*|--all)(?:\s|$)',
+        "broad Git staging",
+    ),
+    (r'\bgit\s+add\s+\.(?:\s|$)', "broad Git staging"),
+    (
+        r'\bgit\s+commit\b[^;|&\n]*(?:\s--all(?:\s|$)|\s-[^-\s]*a[^\s]*(?:\s|$))',
+        "broad Git commit",
+    ),
     (r'\bgit\s+reset\s+--hard\b', "git reset --hard (destroys uncommitted changes)"),
     (r'\bgit\s+push\b.*--force\b', "git force push (rewrites remote history)"),
     (r'\bgit\s+push\b.*-f\b', "git force push short flag (rewrites remote history)"),
@@ -612,9 +631,10 @@ def _rewrite_resolved_user_home(command: str) -> str:
             continue
         seen.add(path)
         # Require an absolute path below root so a bad HOME cannot rewrite the
-        # whole filesystem namespace.
+        # whole filesystem namespace. A root-owned service legitimately has
+        # HOME=/root, which contains only one slash and must still be covered.
         normalized = path.rstrip("/")
-        if not normalized.startswith("/") or normalized.count("/") < 2:
+        if not normalized.startswith("/") or normalized == "/":
             continue
         command = command.replace(normalized + "/", "~/")
     return command
