@@ -3548,11 +3548,17 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> Li
     #   include takes precedence over exclude
     #   Neither set → register all tools (backward-compatible default)
     tools_filter = config.get("tools") or {}
-    include_set = _normalize_name_filter(tools_filter.get("include"), f"mcp_servers.{name}.tools.include")
+    include_value = tools_filter.get("include")
+    include_configured = include_value is not None
+    include_set = _normalize_name_filter(include_value, f"mcp_servers.{name}.tools.include")
     exclude_set = _normalize_name_filter(tools_filter.get("exclude"), f"mcp_servers.{name}.tools.exclude")
 
     def _should_register(tool_name: str) -> bool:
-        if include_set:
+        # Presence of an explicit include list selects whitelist semantics.
+        # An empty list therefore means "register no tools", not "register
+        # everything". This is important when disabling the final allowed
+        # tool through ``hermes tools disable``.
+        if include_configured:
             return tool_name in include_set
         if exclude_set:
             return tool_name not in exclude_set

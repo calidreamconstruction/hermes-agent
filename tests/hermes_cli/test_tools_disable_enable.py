@@ -85,6 +85,38 @@ class TestToolsDisableMcp:
         saved = mock_save.call_args[0][0]
         assert saved["mcp_servers"]["github"]["tools"]["exclude"].count("create_issue") == 1
 
+    def test_disable_removes_tool_from_existing_include_list(self):
+        config = {
+            "mcp_servers": {
+                "github": {
+                    "tools": {"include": ["create_issue", "delete_branch"]}
+                }
+            }
+        }
+        with patch("hermes_cli.tools_config.load_config", return_value=config), \
+             patch("hermes_cli.tools_config.save_config") as mock_save:
+            tools_disable_enable_command(
+                Namespace(tools_action="disable", names=["github:create_issue"], platform="cli")
+            )
+        tools = mock_save.call_args[0][0]["mcp_servers"]["github"]["tools"]
+        assert tools["include"] == ["delete_branch"]
+        assert "exclude" not in tools
+
+    def test_disable_last_included_tool_preserves_empty_whitelist(self):
+        config = {
+            "mcp_servers": {
+                "github": {"tools": {"include": ["create_issue"]}}
+            }
+        }
+        with patch("hermes_cli.tools_config.load_config", return_value=config), \
+             patch("hermes_cli.tools_config.save_config") as mock_save:
+            tools_disable_enable_command(
+                Namespace(tools_action="disable", names=["github:create_issue"], platform="cli")
+            )
+        tools = mock_save.call_args[0][0]["mcp_servers"]["github"]["tools"]
+        assert tools["include"] == []
+        assert "exclude" not in tools
+
     def test_disable_unknown_server_prints_error(self, capsys):
         config = {"mcp_servers": {}}
         with patch("hermes_cli.tools_config.load_config", return_value=config), \
@@ -111,6 +143,21 @@ class TestToolsEnableMcp:
         saved = mock_save.call_args[0][0]
         assert "create_issue" not in saved["mcp_servers"]["github"]["tools"]["exclude"]
         assert "delete_branch" in saved["mcp_servers"]["github"]["tools"]["exclude"]
+
+    def test_enable_adds_tool_to_existing_include_list(self):
+        config = {
+            "mcp_servers": {
+                "github": {"tools": {"include": ["delete_branch"]}}
+            }
+        }
+        with patch("hermes_cli.tools_config.load_config", return_value=config), \
+             patch("hermes_cli.tools_config.save_config") as mock_save:
+            tools_disable_enable_command(
+                Namespace(tools_action="enable", names=["github:create_issue"], platform="cli")
+            )
+        tools = mock_save.call_args[0][0]["mcp_servers"]["github"]["tools"]
+        assert tools["include"] == ["delete_branch", "create_issue"]
+        assert "exclude" not in tools
 
 
 # ── Mixed targets ────────────────────────────────────────────────────────────

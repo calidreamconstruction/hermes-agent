@@ -3432,6 +3432,20 @@ class TestMCPSelectiveToolLoading:
         )
         assert registered == ["mcp_ink_create_service"]
 
+    def test_explicit_empty_include_registers_no_tools(self):
+        config = {
+            "url": "https://mcp.example.com",
+            "tools": {"include": []},
+        }
+        registered, mock_registry = self._run_discover(
+            "ink_empty_include",
+            ["create_service", "delete_service", "list_services"],
+            config,
+            session=SimpleNamespace(),
+        )
+        assert registered == []
+        assert mock_registry.get_all_tool_names() == []
+
     def test_exclude_filter_registers_all_except_listed_tools(self):
         config = {
             "url": "https://mcp.example.com",

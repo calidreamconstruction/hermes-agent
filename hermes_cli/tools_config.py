@@ -3790,7 +3790,11 @@ def _apply_toolset_change(config: dict, platform: str, toolset_names: List[str],
 
 
 def _apply_mcp_change(config: dict, targets: List[str], action: str) -> Set[str]:
-    """Add or remove specific MCP tools from a server's exclude list.
+    """Enable or disable specific MCP tools without changing filter mode.
+
+    Servers configured with an ``include`` whitelist must be edited through
+    that whitelist because include takes precedence over exclude at runtime.
+    Servers without a whitelist continue to use the exclude blacklist.
 
     Returns the set of server names that were not found in config.
     """
@@ -3803,6 +3807,18 @@ def _apply_mcp_change(config: dict, targets: List[str], action: str) -> Set[str]
             failed_servers.add(server_name)
             continue
         tools_cfg = mcp_servers[server_name].setdefault("tools", {})
+
+        include = tools_cfg.get("include")
+        if isinstance(include, list):
+            if action == "disable":
+                tools_cfg["include"] = [t for t in include if t != tool_name]
+            elif tool_name not in include:
+                tools_cfg["include"] = [*include, tool_name]
+            # An exclude list is ineffective while include is configured and
+            # retaining both makes the saved policy misleading.
+            tools_cfg.pop("exclude", None)
+            continue
+
         exclude = list(tools_cfg.get("exclude") or [])
         if action == "disable":
             if tool_name not in exclude:
