@@ -426,6 +426,14 @@ def get_cached_check_fn_result(fn: Callable) -> Optional[bool]:
 class ToolRegistry:
     """Singleton registry that collects tool schemas + handlers from tool files."""
 
+    # Model tool-calling aliases: some models reliably emit a different name
+    # for a canonical tool (e.g. ``shell`` for ``terminal``). These are NOT
+    # advertised in the schema — they only correct a hallucinated name at
+    # dispatch time so the call succeeds instead of erroring as "Unknown tool".
+    _TOOL_NAME_ALIASES: Dict[str, str] = {
+        "shell": "terminal",
+    }
+
     def __init__(self):
         self._tools: Dict[str, ToolEntry] = {}  # built-in / process-global registrations
         # Plugin overlays keyed by resolved HERMES_HOME; a profile sees its overlay first.
@@ -881,6 +889,15 @@ class ToolRegistry:
         """Execute a tool handler by name: async handlers bridged via ``_run_async()``,
         results normalized, every exception returned as ``{"error": ...}``."""
         entry = self.get_entry(name, scope=scope)
+        if not entry:
+            # Correct a model-hallucinated tool name (e.g. ``shell`` ->
+            # ``terminal``) before giving up. The alias is not advertised in
+            # the schema; it only rescues a wrong-name call at dispatch time.
+            canonical = self._TOOL_NAME_ALIASES.get(name)
+            if canonical:
+                entry = self.get_entry(canonical, scope=scope)
+                if entry:
+                    name = canonical
         if not entry:
             return tool_error(f"Unknown tool: {name}")
         try:
