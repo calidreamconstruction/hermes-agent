@@ -104,6 +104,10 @@ class ReasoningParamsMixin:
         if base_url_host_matches(url, "ollama.com"):
             # Ollama Cloud: /api/show capabilities are authoritative.
             return self._ollama_supports_thinking_cached()
+        if url and any(base_url_host_matches(url, h) for h in ("127.0.0.1", "localhost", "[::1]")):
+            # Local Ollama endpoints: /api/show is authoritative here too — honors
+            # reasoning_effort "none" = think:false (verified 2026-09-22: gemma4 3x faster).
+            return self._ollama_supports_thinking_cached()
         if not self._is_openrouter_url() or base_url_host_matches(url, "api.mistral.ai"):
             return False
         # Live-catalog metadata first (OpenRouter /v1/models supported_parameters) — the static prefix
