@@ -7655,7 +7655,14 @@ class AIAgent:
         # /api/show capabilities list is authoritative — emit reasoning_effort
         # only for models that declare the "thinking" capability. deepseek-v4
         # has it; gemma3 / qwen3-coder don't. Cached per (model, base_url).
+        # LOCAL ollama (127.0.0.1/localhost) uses the same probe: its /v1
+        # endpoint accepts reasoning_effort and honors "none" = think:false
+        # (verified 2026-09-22: gemma4 answers 3x faster with zero thinking).
         if base_url_host_matches(self._base_url_lower, "ollama.com"):
+            return self._ollama_supports_thinking_cached()
+        if self._base_url_lower and any(
+            h in self._base_url_lower for h in ("127.0.0.1", "localhost", "[::1]")
+        ):
             return self._ollama_supports_thinking_cached()
         if not self._is_openrouter_url():
             return False
