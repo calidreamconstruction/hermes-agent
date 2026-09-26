@@ -135,7 +135,7 @@ class TestCuratedModelsForProvider:
             "hermes_cli.models.fetch_openrouter_models",
             return_value=[
                 ("anthropic/claude-opus-4.6", "recommended"),
-                ("qwen/qwen3.6-plus", ""),
+                ("qwen/worker-coder:latest-plus", ""),
             ],
         ):
             models = curated_models_for_provider("openrouter")
@@ -185,7 +185,7 @@ class TestProviderModelIds:
             "hermes_cli.models.fetch_openrouter_models",
             return_value=[
                 ("anthropic/claude-opus-4.6", "recommended"),
-                ("qwen/qwen3.6-plus", ""),
+                ("qwen/worker-coder:latest-plus", ""),
             ],
         ):
             ids = provider_model_ids("openrouter")
