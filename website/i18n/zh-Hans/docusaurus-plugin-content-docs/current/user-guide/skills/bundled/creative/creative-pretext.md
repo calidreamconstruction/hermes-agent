@@ -177,7 +177,7 @@ while (true) {
 5. **本地验证**：
    ```sh
    cd <dir-with-html> && python3 -m http.server 8765
-   # then open http://localhost:8765/<file>.html
+   # then open http://127.0.0.1:8765/<file>.html
    ```
 6. **检查控制台** —— 若 `prepareWithSegments` 传入错误的字体字符串，pretext 会抛出异常；`Intl.Segmenter` 在所有现代浏览器中均可用。
 7. **向用户展示文件路径**，而非仅展示代码 —— 他们想直接打开文件。

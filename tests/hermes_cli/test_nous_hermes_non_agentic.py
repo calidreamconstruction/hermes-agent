@@ -52,7 +52,7 @@ def test_matches_real_nous_hermes_chat_models(model_name: str) -> None:
         "hermes-honcho:qwen3-8b-ctx8k",
         # Plain unrelated models
         "qwen3:14b",
-        "qwen3-coder:30b",
+        "worker-coder:latest",
         "qwen2.5:14b",
         "claude-opus-4-6",
         "anthropic/claude-sonnet-4.5",

@@ -65,7 +65,7 @@ command in that test:
 ```bash
 export HERMES_HOME=/tmp/hermes-nemo-relay-test
 hermes plugins enable observability/nemo_relay
-hermes chat --query 'Reply exactly ok' --provider custom --model qwen3.6:35b
+hermes chat --query 'Reply exactly ok' --provider custom --model worker-coder:latest:35b
 ```
 
 For source checkouts, make sure the `hermes` command you run is built from the
@@ -75,7 +75,7 @@ new bundled plugins from your working tree.
 ```bash
 uv sync --extra nemo-relay
 uv run hermes plugins enable observability/nemo_relay
-uv run hermes chat --query 'Reply exactly ok' --provider custom --model qwen3.6:35b
+uv run hermes chat --query 'Reply exactly ok' --provider custom --model worker-coder:latest:35b
 ```
 
 To ship the updated CLI into another environment, build and install a fresh
@@ -206,7 +206,7 @@ mkdir -p "$HERMES_HOME"
 cat > "$HERMES_HOME/config.yaml" <<'YAML'
 model:
   provider: custom
-  default: qwen3.6:35b
+  default: worker-coder:latest:35b
   base_url: http://127.0.0.1:11434/v1
   api_key: ollama
 plugins:
@@ -216,7 +216,7 @@ delegation:
   max_spawn_depth: 2
   max_concurrent_children: 2
   child_timeout_seconds: 180
-  model: qwen3.6:35b
+  model: worker-coder:latest:35b
   provider: custom
   base_url: http://127.0.0.1:11434/v1
   api_key: ollama
@@ -243,7 +243,7 @@ export HERMES_NEMO_RELAY_ATIF_SUBAGENT_EXPORT_MODE=all
 hermes chat \
   --query 'Use delegate_task exactly once. Ask the child subagent to use the terminal tool exactly once to run printf docs_nested_leaf_function. After the child returns, reply with exactly: parent received nested subagent result.' \
   --provider custom \
-  --model qwen3.6:35b \
+  --model worker-coder:latest:35b \
   --toolsets delegation,terminal \
   --max-turns 10 \
   --quiet \
@@ -272,7 +272,7 @@ Sanitized ATIF excerpt:
 {
   "schema_version": "ATIF-v1.7",
   "session_id": "docs-parent-session",
-  "agent": {"name": "Hermes Agent E2E", "version": "docs-example", "model_name": "qwen3.6:35b"},
+  "agent": {"name": "Hermes Agent E2E", "version": "docs-example", "model_name": "worker-coder:latest:35b"},
   "steps": [
     {
       "source": "agent",
@@ -328,7 +328,7 @@ export HERMES_NEMO_RELAY_ATIF_AGENT_VERSION=docs-example
 hermes chat \
   --query 'Use exactly two read_file tool calls in the same assistant message. Read alpha.txt and beta.txt. Do not call terminal. After both tool results are available, reply with exactly: parallel tools complete.' \
   --provider custom \
-  --model qwen3.6:35b \
+  --model worker-coder:latest:35b \
   --toolsets file \
   --max-turns 8 \
   --quiet \
@@ -358,7 +358,7 @@ Sanitized ATIF excerpt:
 {
   "schema_version": "ATIF-v1.7",
   "session_id": "docs-parallel-session",
-  "agent": {"name": "Hermes Agent E2E", "version": "docs-example", "model_name": "qwen3.6:35b"},
+  "agent": {"name": "Hermes Agent E2E", "version": "docs-example", "model_name": "worker-coder:latest:35b"},
   "steps": [
     {
       "source": "agent",
@@ -455,7 +455,7 @@ mkdir -p "$HERMES_HOME" /tmp/hermes-middleware-test/nemo-relay
 cat > "$HERMES_HOME/config.yaml" <<'YAML'
 model:
   provider: custom
-  default: qwen3.6:35b
+  default: worker-coder:latest:35b
   base_url: http://127.0.0.1:11434/v1
   api_key: ollama
 plugins:
@@ -499,7 +499,7 @@ export HERMES_NEMO_RELAY_PLUGINS_TOML=/tmp/hermes-middleware-test/nemo-relay/plu
 hermes chat \
   --query 'Use the terminal tool exactly once to run printf middleware_execution_ok. Then reply with exactly the command output.' \
   --provider custom \
-  --model qwen3.6:35b \
+  --model worker-coder:latest:35b \
   --toolsets terminal \
   --max-turns 4 \
   --quiet \
@@ -530,7 +530,7 @@ Expected ATIF shape:
   "agent": {
     "name": "Hermes Middleware E2E",
     "version": "local",
-    "model_name": "qwen3.6:35b"
+    "model_name": "worker-coder:latest:35b"
   },
   "steps": [
     {

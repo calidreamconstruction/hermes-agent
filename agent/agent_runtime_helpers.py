@@ -1299,7 +1299,7 @@ def anthropic_prompt_cache_policy(
         return True, True
     if (is_openrouter or is_nous_portal) and is_claude:
         return True, False
-    # Nous Portal Qwen (e.g. qwen3.6-plus) takes the same envelope-layout
+    # Nous Portal Qwen (e.g. worker-coder:latest-plus) takes the same envelope-layout
     # cache_control path as Portal Claude. Portal proxies to OpenRouter
     # and the upstream Qwen route accepts cache_control markers; without
     # this branch the alibaba-family check below only matches
@@ -1333,7 +1333,7 @@ def anthropic_prompt_cache_policy(
     # Qwen/Alibaba on OpenCode (Zen/Go) and native DashScope: OpenAI-wire
     # transport that accepts Anthropic-style cache_control markers and
     # rewards them with real cache hits.  Without this branch
-    # qwen3.6-plus on opencode-go reports 0% cached tokens and burns
+    # worker-coder:latest-plus on opencode-go reports 0% cached tokens and burns
     # through the subscription on every turn.
     model_is_qwen = "qwen" in model_lower
     provider_is_alibaba_family = provider_lower in {

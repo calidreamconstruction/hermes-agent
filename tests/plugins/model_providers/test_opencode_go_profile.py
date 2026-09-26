@@ -129,7 +129,7 @@ class TestOpenCodeGoModelGating:
         "model",
         [
             "glm-5.1",
-            "qwen3.6-plus",
+            "worker-coder:latest-plus",
             "minimax-m2.7",
             "deepseek-v3.1",
             "deepseek-chat",

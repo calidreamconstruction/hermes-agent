@@ -18,7 +18,7 @@ class TestCustomProvidersValidation:
                 "rate_limit_delay": 2.0,
                 "fallback_model": {
                     "provider": "openrouter",
-                    "model": "qwen/qwen3.6-plus:free",
+                    "model": "qwen/worker-coder:latest-plus:free",
                 },
             },
             "fallback_providers": [],

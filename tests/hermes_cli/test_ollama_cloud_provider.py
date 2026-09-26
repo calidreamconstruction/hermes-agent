@@ -436,14 +436,14 @@ class TestOllamaCloudSuffixStripping:
 
         mock_mdev = {
             "ollama-cloud": {
-                "models": {"qwen3-coder:480b-cloud": {"tool_call": True}}
+                "models": {"worker-coder:latest": {"tool_call": True}}
             }
         }
         with patch("agent.models_dev.fetch_models_dev", return_value=mock_mdev):
             result = fetch_ollama_cloud_models(force_refresh=True)
 
         assert "qwen3-coder:480b" in result
-        assert "qwen3-coder:480b-cloud" not in result
+        assert "worker-coder:latest" not in result
 
     def test_no_duplicate_when_live_clean_and_mdev_suffixed(self, tmp_path, monkeypatch):
         """Live API returns clean ID; mdev has :cloud variant — result has exactly one entry."""
@@ -492,6 +492,6 @@ class TestOllamaCloudSuffixStripping:
 
         assert _strip_ollama_cloud_suffix("kimi-k2.6:cloud") == "kimi-k2.6"
         assert _strip_ollama_cloud_suffix("glm-5.1:cloud") == "glm-5.1"
-        assert _strip_ollama_cloud_suffix("qwen3-coder:480b-cloud") == "qwen3-coder:480b"
+        assert _strip_ollama_cloud_suffix("worker-coder:latest") == "qwen3-coder:480b"
         assert _strip_ollama_cloud_suffix("nemotron-3-nano:30b") == "nemotron-3-nano:30b"
         assert _strip_ollama_cloud_suffix("") == ""

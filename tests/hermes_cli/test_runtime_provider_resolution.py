@@ -1654,13 +1654,13 @@ def test_get_named_custom_provider_includes_model(monkeypatch):
             "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
             "api_key": "test-key",
             "api_mode": "chat_completions",
-            "model": "qwen3.6-plus",
+            "model": "worker-coder:latest-plus",
         }],
     })
 
     result = rp._get_named_custom_provider("my-dashscope")
     assert result is not None
-    assert result["model"] == "qwen3.6-plus"
+    assert result["model"] == "worker-coder:latest-plus"
 
 
 def test_get_named_custom_provider_excludes_empty_model(monkeypatch):
@@ -1694,14 +1694,14 @@ def test_named_custom_runtime_propagates_model_direct_path(monkeypatch):
             "name": "my-server",
             "base_url": "http://localhost:8000/v1",
             "api_key": "test-key",
-            "model": "qwen3.6-plus",
+            "model": "worker-coder:latest-plus",
         },
     )
     # Ensure pool doesn't intercept
     monkeypatch.setattr(rp, "_try_resolve_from_custom_pool", lambda *a, **k: None)
 
     resolved = rp.resolve_runtime_provider(requested="my-server")
-    assert resolved["model"] == "qwen3.6-plus"
+    assert resolved["model"] == "worker-coder:latest-plus"
     assert resolved["provider"] == "custom"
 
 
@@ -1741,7 +1741,7 @@ def test_named_custom_runtime_propagates_model_pool_path(monkeypatch):
             "name": "my-server",
             "base_url": "http://localhost:8000/v1",
             "api_key": "test-key",
-            "model": "qwen3.6-plus",
+            "model": "worker-coder:latest-plus",
         },
     )
     # Pool returns a result (intercepting the normal path)
@@ -1757,7 +1757,7 @@ def test_named_custom_runtime_propagates_model_pool_path(monkeypatch):
     )
 
     resolved = rp.resolve_runtime_provider(requested="my-server")
-    assert resolved["model"] == "qwen3.6-plus", (
+    assert resolved["model"] == "worker-coder:latest-plus", (
         "model must be injected into pool result"
     )
     assert resolved["api_key"] == "pool-key", "pool credentials should be used"

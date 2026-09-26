@@ -493,11 +493,11 @@ class TestIntegrationWithModelsModule:
 # Drift guard — prevent the in-repo curated lists from going out of sync with
 # the docs-hosted manifest at website/static/api/model-catalog.json.
 #
-# History: qwen/qwen3.6-plus was added to _PROVIDER_MODELS["nous"] in commit
+# History: qwen/worker-coder:latest-plus was added to _PROVIDER_MODELS["nous"] in commit
 # 9dd6e5510 but website/static/api/model-catalog.json was not regenerated for
 # weeks, so free-tier users on a new install fetched a stale manifest and the
 # free-tier picker showed "No free models currently available." even though
-# the Portal was serving qwen/qwen3.6-plus as free. CI must catch this.
+# the Portal was serving qwen/worker-coder:latest-plus as free. CI must catch this.
 # -----------------------------------------------------------------------------
 
 

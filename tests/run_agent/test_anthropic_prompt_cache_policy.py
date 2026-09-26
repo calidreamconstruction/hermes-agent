@@ -193,7 +193,7 @@ class TestQwenAlibabaFamily:
             provider="opencode-go",
             base_url="https://opencode.ai/v1",
             api_mode="chat_completions",
-            model="qwen3.6-plus",
+            model="worker-coder:latest-plus",
         )
         should, native = agent._anthropic_prompt_cache_policy()
         assert should is True, "Qwen on opencode-go must cache"
@@ -259,14 +259,14 @@ class TestQwenAlibabaFamily:
 
     def test_qwen_on_nous_portal_caches_with_envelope_layout(self):
         # Nous Portal Qwen takes the same envelope-layout cache_control
-        # path as Portal Claude. Without this, Portal-routed qwen3.6-plus
+        # path as Portal Claude. Without this, Portal-routed worker-coder:latest-plus
         # falls through to the alibaba-family check (which only matches
         # provider=opencode/alibaba) and serves 0% cache hits.
         agent = _make_agent(
             provider="nous",
             base_url="https://inference-api.nousresearch.com/v1",
             api_mode="chat_completions",
-            model="qwen3.6-plus",
+            model="worker-coder:latest-plus",
         )
         assert agent._anthropic_prompt_cache_policy() == (True, False)
 
@@ -276,7 +276,7 @@ class TestQwenAlibabaFamily:
             provider="nous",
             base_url="https://inference-api.nousresearch.com/v1",
             api_mode="chat_completions",
-            model="qwen/qwen3.6-plus",
+            model="qwen/worker-coder:latest-plus",
         )
         assert agent._anthropic_prompt_cache_policy() == (True, False)
 

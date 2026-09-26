@@ -325,7 +325,7 @@ Get your API key at [novita.ai/settings/key-management](https://novita.ai/settin
 hermes model
 # → pick "Ollama Cloud"
 # → paste your OLLAMA_API_KEY
-# → select from discovered models (gpt-oss:120b, glm-4.6:cloud, qwen3-coder:480b-cloud, etc.)
+# → select from discovered models (gpt-oss:120b, glm-4.6:cloud, worker-coder:latest, etc.)
 ```
 
 Or `config.yaml` directly:
@@ -335,7 +335,7 @@ model:
   default: "gpt-oss:120b"
 ```
 
-The model catalog is fetched dynamically from `ollama.com/v1/models` and cached for one hour. `model:tag` notation (e.g. `qwen3-coder:480b-cloud`) is preserved through normalization — don't use dashes.
+The model catalog is fetched dynamically from `ollama.com/v1/models` and cached for one hour. `model:tag` notation (e.g. `worker-coder:latest`) is preserved through normalization — don't use dashes.
 
 :::tip Ollama Cloud vs local Ollama
 Both speak the same OpenAI-compatible API. Cloud is a first-class provider (`--provider ollama-cloud`, `OLLAMA_API_KEY`); local Ollama is reached via the Custom Endpoint flow (base URL `http://localhost:11434/v1`, no key). Use cloud for large models you can't run locally; use local for privacy or offline work.
@@ -1280,7 +1280,7 @@ The `hermes model` → Custom Endpoint wizard now prompts for `api_mode` explici
 model:
   provider: custom
   base_url: http://localhost:8080/v1
-  default: qwen3.6-35b-a3b
+  default: worker-coder:latest-35b-a3b
   supports_vision: true   # send images natively; otherwise vision_analyze pre-describes them
 ```
 

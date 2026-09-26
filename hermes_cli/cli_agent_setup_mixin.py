@@ -131,7 +131,7 @@ class CLIAgentSetupMixin:
         # use it as the effective model name.  Without this, running
         # `hermes chat --model <provider-name>` sends the provider name
         # (e.g. "my-provider") as the model string to the API instead of
-        # the configured model (e.g. "qwen3.6-plus"), causing 400 errors.
+        # the configured model (e.g. "worker-coder:latest-plus"), causing 400 errors.
         runtime_model = runtime.get("model")
         if runtime_model and isinstance(runtime_model, str):
             # Only use runtime model if: model is unset, or model equals provider name

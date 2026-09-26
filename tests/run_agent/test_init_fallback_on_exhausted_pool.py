@@ -36,7 +36,7 @@ def test_init_tries_fallback_when_primary_returns_none():
 
         agent = AIAgent(
             provider="alibaba-coding-plan",
-            model="qwen3.6-plus",
+            model="worker-coder:latest-plus",
             api_key=None,
             base_url=None,
             quiet_mode=True,
@@ -59,7 +59,7 @@ def test_init_raises_when_no_fallback_configured():
         with pytest.raises(RuntimeError, match="no API key was found"):
             AIAgent(
                 provider="alibaba-coding-plan",
-                model="qwen3.6-plus",
+                model="worker-coder:latest-plus",
                 api_key=None,
                 base_url=None,
                 quiet_mode=True,

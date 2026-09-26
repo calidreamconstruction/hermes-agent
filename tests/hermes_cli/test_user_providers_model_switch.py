@@ -541,8 +541,8 @@ def test_list_authenticated_providers_hides_custom_shadowing_builtin_endpoint(mo
             # Matches PROVIDER_REGISTRY['alibaba'].inference_base_url exactly.
             "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
             "api_key": "sk-sp-test",
-            "model": "qwen3.6-plus",
-            "models": {"qwen3.6-plus": {"context_length": 500000}},
+            "model": "worker-coder:latest-plus",
+            "models": {"worker-coder:latest-plus": {"context_length": 500000}},
         }
     ]
 
@@ -586,8 +586,8 @@ def test_list_authenticated_providers_keeps_custom_with_distinct_endpoint(monkey
             "name": "my-private-relay",
             "base_url": "https://relay.example.internal/v1",
             "api_key": "sk-relay-test",
-            "model": "qwen3.6-plus",
-            "models": {"qwen3.6-plus": {}},
+            "model": "worker-coder:latest-plus",
+            "models": {"worker-coder:latest-plus": {}},
         }
     ]
 
@@ -631,7 +631,7 @@ def test_list_authenticated_providers_dedup_honors_base_url_env_override(monkeyp
             # Same URL as DASHSCOPE_BASE_URL env override above.
             "base_url": "https://custom-dashscope.example.com/v1",
             "api_key": "sk-test",
-            "model": "qwen3.6-plus",
+            "model": "worker-coder:latest-plus",
         }
     ]
 

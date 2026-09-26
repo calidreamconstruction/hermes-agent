@@ -197,7 +197,7 @@ class TestCustomProviderModelSwitch:
             "- name: Example Provider\n"
             "  base_url: https://api.example-provider.test/v1\n"
             "  api_key: ${EXAMPLE_PROVIDER_API_KEY}\n"
-            "  model: qwen3.6-35b-fast\n"
+            "  model: worker-coder:latest-35b-fast\n"
         )
         monkeypatch.setenv("EXAMPLE_PROVIDER_API_KEY", "sk-live-example-provider")
 
@@ -206,10 +206,10 @@ class TestCustomProviderModelSwitch:
             "base_url": "https://api.example-provider.test/v1",
             "api_key": "sk-live-example-provider",
             "api_key_ref": "${EXAMPLE_PROVIDER_API_KEY}",
-            "model": "qwen3.6-35b-fast",
+            "model": "worker-coder:latest-35b-fast",
         }
 
-        with patch("hermes_cli.models.fetch_api_models", return_value=["qwen3.6-35b-fast"]) as mock_fetch, \
+        with patch("hermes_cli.models.fetch_api_models", return_value=["worker-coder:latest-35b-fast"]) as mock_fetch, \
              patch("hermes_cli.curses_ui.curses_radiolist", side_effect=ImportError), \
              patch("builtins.input", return_value="1"), \
              patch("builtins.print"):
@@ -238,7 +238,7 @@ class TestCustomProviderModelSwitch:
             "- name: Example Provider\n"
             "  base_url: https://api.example-provider.test/v1\n"
             "  key_env: EXAMPLE_PROVIDER_API_KEY\n"
-            "  model: qwen3.6-35b-fast\n"
+            "  model: worker-coder:latest-35b-fast\n"
         )
         monkeypatch.setenv("EXAMPLE_PROVIDER_API_KEY", "sk-live-example-provider")
 
@@ -247,10 +247,10 @@ class TestCustomProviderModelSwitch:
             "base_url": "https://api.example-provider.test/v1",
             "api_key": "",
             "key_env": "EXAMPLE_PROVIDER_API_KEY",
-            "model": "qwen3.6-35b-fast",
+            "model": "worker-coder:latest-35b-fast",
         }
 
-        with patch("hermes_cli.models.fetch_api_models", return_value=["qwen3.6-35b-fast"]), \
+        with patch("hermes_cli.models.fetch_api_models", return_value=["worker-coder:latest-35b-fast"]), \
              patch("hermes_cli.curses_ui.curses_radiolist", side_effect=ImportError), \
              patch("builtins.input", return_value="1"), \
              patch("builtins.print"):
@@ -286,7 +286,7 @@ class TestCustomProviderModelSwitch:
             "- name: NeuralWatt\n"
             "  base_url: ${NEURALWATT_API_BASE}\n"
             "  api_key: ${NEURALWATT_API_KEY}\n"
-            "  model: qwen3.6-35b-fast\n"
+            "  model: worker-coder:latest-35b-fast\n"
             "  models: []\n"
         )
         monkeypatch.setenv("NEURALWATT_API_BASE", "https://api.neuralwatt.com/v1")
@@ -308,7 +308,7 @@ class TestCustomProviderModelSwitch:
         with patch("hermes_cli.main._prompt_provider_choice",
                    side_effect=_pick_neuralwatt), \
              patch("hermes_cli.models.fetch_api_models",
-                   return_value=["qwen3.6-35b-fast"]) as mock_fetch, \
+                   return_value=["worker-coder:latest-35b-fast"]) as mock_fetch, \
              patch("hermes_cli.curses_ui.curses_radiolist", side_effect=ImportError), \
              patch("builtins.input", return_value="1"), \
              patch("builtins.print"):
@@ -404,7 +404,7 @@ class TestCustomProviderModelSwitch:
             "- name: NeuralWatt\n"
             "  base_url: ${NEURALWATT_API_BASE}\n"
             "  api_key: ${NEURALWATT_API_KEY}\n"
-            "  model: qwen3.6-35b-fast\n"
+            "  model: worker-coder:latest-35b-fast\n"
             "  models: []\n"
         )
         monkeypatch.setenv("NEURALWATT_API_BASE", "https://api.neuralwatt.com/v1")
@@ -421,7 +421,7 @@ class TestCustomProviderModelSwitch:
         with patch("hermes_cli.main._prompt_provider_choice",
                    side_effect=_pick_neuralwatt), \
              patch("hermes_cli.models.fetch_api_models",
-                   return_value=["qwen3.6-35b-fast"]) as mock_fetch, \
+                   return_value=["worker-coder:latest-35b-fast"]) as mock_fetch, \
              patch("hermes_cli.curses_ui.curses_radiolist", side_effect=ImportError), \
              patch("builtins.input", return_value="1"), \
              patch("builtins.print"):

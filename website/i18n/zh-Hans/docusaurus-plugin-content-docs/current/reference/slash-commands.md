@@ -163,7 +163,7 @@ model_aliases:
     model: grok-4
     provider: x-ai
   ollama-qwen:
-    model: qwen3-coder:30b
+    model: worker-coder:latest
     provider: custom
     base_url: http://localhost:11434/v1
 ```

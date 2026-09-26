@@ -304,7 +304,7 @@ model:
 hermes model
 # → 选择"Ollama Cloud"
 # → 粘贴你的 OLLAMA_API_KEY
-# → 从已发现的模型中选择（gpt-oss:120b、glm-4.6:cloud、qwen3-coder:480b-cloud 等）
+# → 从已发现的模型中选择（gpt-oss:120b、glm-4.6:cloud、worker-coder:latest 等）
 ```
 
 或直接编辑 `config.yaml`：
@@ -314,7 +314,7 @@ model:
   default: "gpt-oss:120b"
 ```
 
-模型目录从 `ollama.com/v1/models` 动态获取，缓存一小时。`model:tag` 格式（如 `qwen3-coder:480b-cloud`）在规范化过程中保留——不要使用连字符。
+模型目录从 `ollama.com/v1/models` 动态获取，缓存一小时。`model:tag` 格式（如 `worker-coder:latest`）在规范化过程中保留——不要使用连字符。
 
 :::tip Ollama Cloud 与本地 Ollama
 两者使用相同的 OpenAI 兼容 API。Cloud 是一等提供商（`--provider ollama-cloud`，`OLLAMA_API_KEY`）；本地 Ollama 通过自定义端点流程访问（基础 URL `http://localhost:11434/v1`，无需 key）。对于无法在本地运行的大模型使用 Cloud；对于隐私保护或离线工作使用本地。

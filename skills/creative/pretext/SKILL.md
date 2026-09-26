@@ -159,7 +159,7 @@ See `templates/donut-orbit.html` and `templates/hello-orb-flow.html` for working
 5. **Verify locally**:
    ```sh
    cd <dir-with-html> && python3 -m http.server 8765
-   # then open http://localhost:8765/<file>.html
+   # then open http://127.0.0.1:8765/<file>.html
    ```
 6. **Check the console** — pretext will throw if `prepareWithSegments` is called with a bad font string; `Intl.Segmenter` is available in every modern browser.
 7. **Show the user the file path**, not just the code — they want to open it.

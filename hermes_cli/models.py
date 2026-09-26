@@ -54,7 +54,7 @@ OPENROUTER_MODELS: list[tuple[str, str]] = [
     # Qwen
     ("qwen/qwen3.7-max",                       ""),
     ("qwen/qwen3.7-plus",                      ""),
-    ("qwen/qwen3.6-35b-a3b",                   ""),
+    ("qwen/worker-coder:latest-35b-a3b",                   ""),
     # MoonshotAI
     ("moonshotai/kimi-k2.6",                   "recommended"),
     ("moonshotai/kimi-k2.7-code",              ""),
@@ -194,7 +194,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         # Qwen
         "qwen/qwen3.7-max",
         "qwen/qwen3.7-plus",
-        "qwen/qwen3.6-35b-a3b",
+        "qwen/worker-coder:latest-35b-a3b",
         # MoonshotAI
         "moonshotai/kimi-k2.6",
         "moonshotai/kimi-k2.7-code",
@@ -438,7 +438,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "minimax-m2.7",
         "minimax-m2.5",
         "qwen3.7-max",
-        "qwen3.6-plus",
+        "worker-coder:latest-plus",
         "qwen3.5-plus",
     ],
     "kilocode": [
@@ -455,7 +455,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
     # or https://dashscope-intl.aliyuncs.com/apps/anthropic (Anthropic-compat).
     "alibaba": [
         "qwen3.7-max",
-        "qwen3.6-plus",
+        "worker-coder:latest-plus",
         "kimi-k2.5",
         "qwen3.5-plus",
         "qwen3-coder-plus",
@@ -469,7 +469,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
     # separate provider ID with its own base_url_env_var.
     "alibaba-coding-plan": [
         "qwen3.7-max",
-        "qwen3.6-plus",
+        "worker-coder:latest-plus",
         "qwen3.5-plus",
         "qwen3-coder-plus",
         "qwen3-coder-next",

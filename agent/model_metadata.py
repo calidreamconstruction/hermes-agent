@@ -250,7 +250,7 @@ DEFAULT_CONTEXT_LENGTHS = {
     "llama": 131072,
     # Qwen — specific model families before the catch-all.
     # Official docs: https://help.aliyun.com/zh/model-studio/developer-reference/
-    "qwen3.6-plus": 1048576,      # 1M context (DashScope/Alibaba & OpenRouter)
+    "worker-coder:latest-plus": 1048576,      # 1M context (DashScope/Alibaba & OpenRouter)
     "qwen3-coder-plus": 1000000,  # 1M context
     "qwen3-coder": 262144,        # 256K context
     "qwen": 131072,
@@ -1546,9 +1546,9 @@ def _resolve_nous_context_length(
     Tries the live Nous inference endpoint first (authoritative), then falls
     back to OpenRouter metadata with suffix/version matching.
 
-    Nous model IDs are bare after prefix-stripping (e.g. 'qwen3.6-plus',
+    Nous model IDs are bare after prefix-stripping (e.g. 'worker-coder:latest-plus',
     'claude-opus-4-6') while OpenRouter uses prefixed IDs (e.g.
-    'qwen/qwen3.6-plus', 'anthropic/claude-opus-4.6').  Version
+    'qwen/worker-coder:latest-plus', 'anthropic/claude-opus-4.6').  Version
     normalization (dot↔dash) is applied to handle name drifts.
 
     Returns ``(context_length, source)`` where ``source`` is one of:
@@ -1560,7 +1560,7 @@ def _resolve_nous_context_length(
     """
     # Portal first — the Nous /models endpoint is authoritative for what our
     # infrastructure enforces and may differ from OR (e.g. OR reports 1M for
-    # qwen3.6-plus; the portal correctly says 262144).  Fall back to the OR
+    # worker-coder:latest-plus; the portal correctly says 262144).  Fall back to the OR
     # catalog only if the portal doesn't list the model.
     if base_url:
         portal_ctx = _resolve_endpoint_context_length(model, base_url, api_key=api_key)

@@ -267,7 +267,7 @@ class TestAutoModeRespectsOverride:
         # native — no need to also set agent.image_input_mode: native.
         cfg = {"model": {"supports_vision": True}}
         with patch("agent.models_dev.get_model_capabilities", return_value=None):
-            assert decide_image_input_mode("custom", "qwen3.6-35b", cfg) == "native"
+            assert decide_image_input_mode("custom", "worker-coder:latest-35b", cfg) == "native"
 
     def test_auto_text_for_custom_with_supports_vision_false(self):
         cfg = {"model": {"supports_vision": False}}
@@ -287,7 +287,7 @@ class TestAutoModeRespectsOverride:
             "auxiliary": {"vision": {"provider": "openrouter", "model": "gemini-2.5-pro"}},
         }
         with patch("agent.models_dev.get_model_capabilities", return_value=None):
-            assert decide_image_input_mode("custom", "qwen3.6-35b", cfg) == "text"
+            assert decide_image_input_mode("custom", "worker-coder:latest-35b", cfg) == "text"
 
 
 # ─── build_native_content_parts ──────────────────────────────────────────────
