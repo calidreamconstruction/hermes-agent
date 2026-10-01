@@ -1473,6 +1473,8 @@ def _parse_compression_config(agent, _agent_cfg) -> CompressionSettings:
         max_attempts = 3
     # threshold_tokens: absolute cap (lower of ratio threshold and this); clamped to the
     # window at apply-time.
+    from agent import context_compressor as _ccmod
+    _ccmod._EXACT_THRESHOLD = is_truthy_value(cfg.get("exact_threshold", False))
     threshold_tokens = cfg.get("threshold_tokens")
     if threshold_tokens is not None:
         threshold_tokens = _positive_int(threshold_tokens)

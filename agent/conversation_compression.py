@@ -2144,6 +2144,12 @@ def revalidate_compression_feasibility(agent: Any) -> None:
     agent._compression_feasibility_checked = False
     if not getattr(agent, "context_compressor", None):
         return
+    # Bind the NEW main runtime first: it is otherwise only published at the next turn start, so a
+    # mid-session /model switch probed ``auxiliary.compression.provider: main`` against the PREVIOUS
+    # model and kept its window as a durable ceiling (gemma 64K capped deepseek-v4-pro:cloud 1M, 2026-09-23).
+    with contextlib.suppress(Exception):
+        from agent.turn_context import _publish_runtime_main
+        _publish_runtime_main(agent)
     try:
         check_compression_model_feasibility(agent)
     except Exception as exc:

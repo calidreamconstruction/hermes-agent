@@ -1078,6 +1078,9 @@ _MAX_KEEP_TOOL_IMAGES = 3
 # floor eats the reclaimed headroom and compaction re-fires every 1-2 turns.
 _SMALL_CTX_WINDOW_LIMIT = 512_000
 _SMALL_CTX_THRESHOLD_PERCENT = 0.75
+# compression.exact_threshold: true -> the configured ratio is used as-is (no 75% small-window
+# floor, no 64K-floor/85% branch). Set per process by agent_init._parse_compression_config.
+_EXACT_THRESHOLD = False
 
 
 _PATH_MENTION_RE = re.compile(r"(?:/|~/?|[A-Za-z]:\\)[^\s`'\")\]}<>]+")
@@ -2530,6 +2533,8 @@ class ContextCompressor(SummaryDispatchMixin, MicroCompactionMixin, ContextEngin
     @staticmethod
     def _effective_threshold_percent(context_length: int, threshold_percent: float) -> float:
         """Raise-only small-context threshold floor: models under 512K trigger at >= 75%."""
+        if _EXACT_THRESHOLD:
+            return threshold_percent
         if context_length and context_length < _SMALL_CTX_WINDOW_LIMIT:
             return max(threshold_percent, _SMALL_CTX_THRESHOLD_PERCENT)
         return threshold_percent
@@ -2559,6 +2564,8 @@ class ContextCompressor(SummaryDispatchMixin, MicroCompactionMixin, ContextEngin
         if effective_window <= 0:
             effective_window = context_length
         pct_value = int(effective_window * threshold_percent)
+        if _EXACT_THRESHOLD:
+            return max(1, min(pct_value, effective_window - 1)) if effective_window > 1 else max(1, pct_value)
         floored = max(pct_value, MINIMUM_CONTEXT_LENGTH)
         # The floor must not consume output headroom: cap at 85% when it is the binding term. Near-minimum windows
         # otherwise trigger at ~98%, and providers that silently clip over-window prompts (ollama) never raise the
