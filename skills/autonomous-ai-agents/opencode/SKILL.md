@@ -22,6 +22,27 @@ Use [OpenCode](https://opencode.ai) as an autonomous coding worker orchestrated 
 - You need long-running coding sessions with progress checks
 - You want parallel task execution in isolated workdirs/worktrees
 
+
+## FaresSystem free model routes (verified 2026-10-02)
+
+For free OpenCode workers, enumerate `opencode models opencode`, select an exact verified ID, and use the native CLI through Hermes terminal. Several free models reject generic HTTP clients with `FreeTierError`; use the installed OpenCode client rather than spoofing headers or adding a proxy.
+
+Verified native IDs (each returned READY with reported cost 0):
+
+- `opencode/big-pickle`
+- `opencode/fledge-alpha-free`
+- `opencode/ling-3.1-flash-free`
+- `opencode/longcat-2.5-preview-free`
+- `opencode/mimo-v2.6-flash-free`
+- `opencode/muse-spark-1.3-contributor-free`
+- `opencode/nemotron-3-ultra-free`
+- `opencode/nemotron-3.5-lightning-free`
+- `opencode/space-bunny-free`
+
+Use `opencode run --pure --model opencode/big-pickle --format json "<bounded task>"` in the task workspace. Read the text/error events and verify the actual task result; exit code zero alone is insufficient. Recheck availability for future work. `ling-3.0-flash-fin-free` returned endpoint unavailable and must not be selected until a fresh successful probe. Models absent from the installed CLI catalog remain unverified, even if advertised by the HTTP catalog.
+
+The direct Hermes/router free route is `space-bunny-free`. All 17 current Ollama Cloud models are registered in the saved FaresSystem router provider; these use existing subscription capacity, not local GPU or a guarantee of free service. Groq and Google are unavailable on the checked VPS/PC credential surfaces. Evidence: FaresSystem `data/proofs/gz/9999995443/`.
+
 ## Prerequisites
 
 - OpenCode installed: `npm i -g opencode-ai@latest` or `brew install anomalyco/tap/opencode`
