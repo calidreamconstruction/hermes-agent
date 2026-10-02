@@ -342,6 +342,16 @@ def activate_dependencies(project_root: Path) -> None:
             return  # External/Nix interpreter owns its original sys.path.
     if not selected.is_dir():
         raise RuntimeError(f"dependency environment has no site-packages: {selected}")
+    # ABI guard: a running interpreter cannot load compiled wheels built for a
+    # different cpXY (pydantic_core._pydantic_core.cpython-314-darwin.so is
+    # unloadable under 3.11). When the committed environment's Python differs
+    # from the RUNNING interpreter's, keep this process's own packages instead
+    # of swapping sys.path onto an environment whose ABI it cannot import.
+    running = (sys.version_info.major, sys.version_info.minor)
+    committed = venv_python_version(environment)
+    if committed is not None and committed != running:
+        os.environ.setdefault("HERMES_PM_ABI_SKIP", f"{running[0]}.{running[1]}!={committed[0]}.{committed[1]}")
+        return  # this process keeps its launch contract (developer venv / system)
     import site
 
     sys.path[:] = [entry for entry in sys.path
