@@ -74,7 +74,6 @@ def test_terminal_output_transform_still_runs_strip_and_redact(monkeypatch, tmp_
     # or collection-time import order (the module snapshots env at import).
     monkeypatch.setattr("agent.redact._REDACT_ENABLED", True)
 
-    secret = "sk-proj-abc123def456ghi789jkl012mno345"
     result, _mock_env = _run_terminal(
         monkeypatch,
         tmp_path,

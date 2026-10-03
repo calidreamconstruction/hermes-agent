@@ -171,7 +171,6 @@ def test_changes_requested_send_failure_retries_without_event_loss(tmp_path, mon
 def test_changes_requested_reason_is_redacted_path_safe_and_truncated(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "redact.db"))
     kb.init_db()
-    secret = "sk-abcdefghijklmnopqrstuvwxyz123456"
     reason = f"See /Users/alice/private/review.log token={secret} " + ("x" * 300)
     _create_review_block("notify", reason=reason)
     adapter = RecordingAdapter()

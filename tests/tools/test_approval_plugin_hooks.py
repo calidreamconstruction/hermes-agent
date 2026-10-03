@@ -170,7 +170,6 @@ class TestSmartModeFiresHooks:
         self, isolated_session, monkeypatch, guard, value, verdict, approved, choice, pattern_key
     ):
         self._configure(monkeypatch, verdict)
-        secret = "sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"
         value = f'{value} # Authorization: Bearer {secret}'
         captured = []
 

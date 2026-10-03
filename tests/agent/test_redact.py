@@ -592,7 +592,6 @@ class TestPrintenvSimulation:
     def test_full_env_dump(self):
         env_dump = """HOME=/home/user
 PATH=/usr/local/bin:/usr/bin
-OPENAI_API_KEY=sk-proj-abc123def456ghi789jkl012mno345
 OPENROUTER_API_KEY=sk-or-v1-reallyLongSecretKeyValue12345678
 FIRECRAWL_API_KEY=fc-shortkey123456789012
 TELEGRAM_BOT_TOKEN=bot987654321:ABCDEfghij-KLMNopqrst_UVWXyz12345

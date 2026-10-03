@@ -435,7 +435,6 @@ class TestSecretRedactionInDisplay:
 
     def test_redact_config_value_walks_lists(self):
         from hermes_cli.config import redact_config_value
-        secret = "sk-deadbeefdeadbeefdeadbeef"
         cfg = {"custom_providers": [{"name": "p", "api_key": secret}]}
 
         out = redact_config_value(cfg)

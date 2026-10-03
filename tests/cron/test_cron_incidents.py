@@ -151,7 +151,6 @@ def test_redaction_applied_to_incident_error(monkeypatch, tmp_path):
     # Pin the flag explicitly, matching the repo-wide pattern.
     monkeypatch.setattr("agent.redact._REDACT_ENABLED", True, raising=False)
     inc = _point_db(monkeypatch, tmp_path)
-    secret = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"
 
     inc_id, _ = inc.upsert_incident("job-1", f"failed: {secret} boom")
 

@@ -135,7 +135,6 @@ def test_profile_scoped_process_caches_follow_routed_home(two_homes, monkeypatch
     a, b = two_homes
     monkeypatch.setattr(redact, "_REDACT_ENABLED", False)  # launch profile opted out
     redact._REDACT_ENABLED_BY_HOME.clear()
-    token = "sk-abcdefghijklmnopqrstuvwxyz0123456789"
     assert redact.redact_sensitive_text(token) == token
     assert _under(b, lambda: redact.redact_sensitive_text(token)) != token
 

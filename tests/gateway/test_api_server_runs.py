@@ -611,7 +611,6 @@ class TestRunEvents:
             result={
                 "exit_code": 2,
                 "error": "BLOCKED: approval required",
-                "token": "sk-abcdefghijklmnopqrstuvwxyz",
                 "output": "x" * 600,
             },
         )

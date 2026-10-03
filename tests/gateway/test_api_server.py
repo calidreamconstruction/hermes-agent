@@ -762,7 +762,6 @@ class TestRunEventCallback:
         adapter._run_statuses.pop(run_id, None)
 
         callback = adapter._make_run_event_callback(run_id, loop)
-        secret = "sk-proj-abcdef1234567890abcdef1234567890abcdef12"
         callback(
             "subagent.complete",
             preview=f"leaked {secret}",

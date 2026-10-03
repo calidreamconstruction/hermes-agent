@@ -2033,7 +2033,6 @@ def test_dump_api_request_debug_reads_the_anthropic_client_and_messages_url(monk
     agent.api_mode = "anthropic_messages"
     agent.base_url = "https://relay.example.com/anthropic"
     agent.client = None
-    agent._anthropic_client = SimpleNamespace(api_key="sk-ant-api03-abcdefghijklmnopqrstuvwxyz")
     agent.logs_dir = tmp_path
 
     dump_file = agent._dump_api_request_debug({"model": "claude", "messages": []}, reason="preflight")

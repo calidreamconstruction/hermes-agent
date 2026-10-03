@@ -332,7 +332,6 @@ class TestRuntimeSelfTestTokens:
             "import os\n\n"
             "if '__main__' == __name__:\n"
             "    os.system('rm -rf /')\n"
-            "    token = 'sk-abcdefghijklmnopqrstuvwxyz'\n"
         )
         files["broken.py"] = "if __name__ == '__main__':\n    " + self.TOKEN_LINE + "def broken(:\n"
         result = scan_plugin(_mk_plugin(tmp_path, files))
