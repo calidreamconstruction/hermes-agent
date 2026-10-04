@@ -8,6 +8,7 @@ late-bound via ``_kb`` (import-cycle breaking) so monkeypatching
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import re
 import signal
@@ -613,12 +614,31 @@ def heartbeat_worker(
     *,
     note: Optional[str] = None,
     expected_run_id: Optional[int] = None,
+    progress_token: Optional[str] = None,
 ) -> bool:
     """Record a ``heartbeat`` event + touch ``last_heartbeat_at``.
 
     Liveness signal orthogonal to the PID check: a worker whose forked child
     (train loop, crawl) is stuck can still have a live Python process.
     Returns False if the task is not running or its claim expired.
+
+    progress_token (owner 2026-10-04, ABSORB-ROUND1 C1)
+    ------------------------------------------------------
+    A timestamp alone cannot distinguish "working" from "wedged in a logic
+    loop", because ``_touch_activity`` refreshes ``last_heartbeat_at`` on every
+    mid-stream chunk — and a loop streams chunks. The docstring above
+    ``release_stale_claims`` claimed the stale check catches exactly that case;
+    it cannot, because the wedged worker keeps its own heartbeat fresh.
+
+    So a caller MAY pass a ``progress_token``: a cheap fingerprint of what the
+    worker actually did (tool name + ordinal, turn index, bytes written).
+    When the token is UNCHANGED between heartbeats, the run is no longer making
+    progress no matter how fresh its timestamp is, and that is recorded on the
+    event so reclaim logic can act on evidence instead of a wall-clock timeout.
+
+    Optional and additive: omitting it preserves the old behaviour exactly, and
+    a CHANGING token is treated as healthy liveness. It is written to
+    ``task_events`` only — no schema change, no new table.
     """
     now = int(time.time())
     with _kb.write_txn(conn):
@@ -637,9 +657,38 @@ def heartbeat_worker(
         )
         if run_id is not None:
             conn.execute("UPDATE task_runs SET last_heartbeat_at = ? WHERE id = ?", (now, run_id))
+
+        payload: dict = {}
+        if note:
+            payload["note"] = note
+        if progress_token is not None:
+            # Compare against the previous heartbeat's token for this run.
+            prev = None
+            if run_id is not None:
+                row = conn.execute(
+                    "SELECT payload FROM task_events "
+                    "WHERE task_id = ? AND run_id = ? AND kind = 'heartbeat' "
+                    "AND json_extract(COALESCE(payload,''), '$.progress_token') IS NOT NULL "
+                    "ORDER BY id DESC LIMIT 1",
+                    (task_id, run_id),
+                ).fetchone()
+                if row and row[0]:
+                    try:
+                        prev = json.loads(row[0]).get("progress_token")
+                    except Exception:
+                        prev = None
+            stalled = prev is not None and prev == progress_token
+            payload["progress_token"] = progress_token
+            payload["progress_stalled"] = stalled
+            if stalled:
+                payload["stalled_reason"] = (
+                    "progress_token unchanged since the previous heartbeat: the "
+                    "worker is alive but not advancing (logic loop). Reclaim on "
+                    "evidence, not on the wall-clock timeout."
+                )
         _kb._append_event(
             conn, task_id, "heartbeat",
-            {"note": note} if note else None,
+            payload or None,
             run_id=run_id,
         )
     return True

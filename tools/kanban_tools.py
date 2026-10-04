@@ -741,6 +741,23 @@ def _handle_complete(args: dict, **kw) -> str:
                 f"in-flight (no state change). Retry kanban_complete with the same "
                 f"summary/metadata and either drop these ids from created_cards, or pass "
                 f"created_cards=[] to skip the card-claim check entirely.")
+        except kb.NoOpCompletionError as noop_err:
+            # The worker reported a no-op (or an unverifiable success) on a real
+            # task. A NO-OP IS NOT A SUCCESSFUL TASK COMPLETION. The gate ran
+            # before the write txn, so the card is untouched and the worker can
+            # retry with a real classification. Spell out the legal options,
+            # otherwise the model treats the tool_error as terminal.
+            return tool_error(
+                f"kanban_complete refused: {noop_err.message} "
+                f"Your task is still in-flight (no state change). Retry with "
+                f"metadata={{'outcome_state': <state>, ...}} where state is one of "
+                f"COMPLETED_WITH_VERIFIED_RESULT (requires evidence the destination "
+                f"changed, e.g. metadata['evidence']), "
+                f"BLOCKED_WITH_EXACT_DEPENDENCY (requires dependency + wake_event), "
+                f"DUPLICATE_ALREADY_OWNED (requires owner), "
+                f"FAILED_RETRYABLE / FAILED_TERMINAL (requires error), "
+                f"DEFERRED_UNTIL_EVENT (requires event), or "
+                f"PARTIAL_CONTINUATION_REQUIRED (requires remaining).")
         except kb.EmptyCompletionError as empty_err:
             # Same shape as the card gate: nothing was mutated, the audit event
             # already landed; the worker retries with evidence instead of stalling.

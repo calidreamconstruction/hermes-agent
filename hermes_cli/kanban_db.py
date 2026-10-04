@@ -2683,6 +2683,20 @@ class HallucinatedCardsError(ValueError):
         )
 
 
+class NoOpCompletionError(ValueError):
+    """``complete_task`` refused: the worker reported a no-op, an unverifiable
+    success, or prose carrying no proof that work occurred.
+
+    A ``ValueError`` so tool error handlers treat it as recoverable. Raised
+    BEFORE the write transaction, so the card is untouched and the worker can
+    retry with a real classification. A no-op is not a successful completion.
+    """
+
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(message)
+
+
 class EmptyCompletionError(ValueError):
     """``complete_task`` refused: no substantive ``result``, ``summary``, or
     stored result. A ``ValueError`` so tool error handlers treat it as
@@ -2757,7 +2771,8 @@ def complete_task(
         return False
     from hermes_cli.kanban_pr_acceptance_store import prepare_acceptance, record_acceptance
     verified_cards = _gate_created_cards(conn, task_id, created_cards, summary or result)
-    _gate_empty_completion(conn, task_id, result=result, summary=summary)
+    _gate_empty_completion(conn, task_id, result=result, summary=summary,
+                           metadata=metadata)
     metadata = _merge_completion_prose_artifacts(
         conn, task_id, metadata, summary=summary, result=result,
     )
@@ -2865,18 +2880,196 @@ def _substantive_text(value: Optional[str]) -> bool:
     return bool(value is not None and str(value).strip())
 
 
+def _gate_outcome_contract(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    result: Optional[str],
+    summary: Optional[str],
+    metadata: Optional[dict] = None,
+) -> None:
+    """Apply the shared outcome contract to a proposed completion.
+
+    Raises :class:`EmptyCompletionError` when the completion has no evidence,
+    and :class:`NoOpCompletionError` when the worker reported a no-op or an
+    unverifiable success on a real task. Both raise BEFORE the write
+    transaction, so the card is left untouched and the worker can retry with a
+    correct classification — the same non-mutating contract the existing card
+    and artifact gates follow.
+
+    Two escape hatches, both deliberate:
+
+    * ``review`` status — a human is vouching for the card, so the existing
+      approval record stands.
+    * An explicit, contract-valid terminal classification in
+      ``metadata["outcome_state"]`` (with its required fields) — this is how
+      BLOCKED / DUPLICATE / DEFERRED / PARTIAL reach the ledger as honest
+      non-success terminal states instead of being forced into ``done``.
+    """
+    row = conn.execute(
+        "SELECT status, result, goal_mode FROM tasks WHERE id = ?", (task_id,)
+    ).fetchone()
+    if row is None:
+        return
+    if row["status"] == "review":
+        return
+
+    meta = dict(metadata) if isinstance(metadata, dict) else {}
+    # An explicit classification wins, provided it is contract-valid.
+    declared = meta.get("outcome_state")
+    if declared:
+        from hermes_cli.task_outcome_contract import (
+            NON_SUCCESS_STATES, Outcome, OutcomeError, validate)
+        if declared in NON_SUCCESS_STATES:
+            # NO_ELIGIBLE_WORK is only legal for a genuine heartbeat/idle poll
+            # with no assigned scope. A real task in `running` must never be
+            # closable as "nothing to do" — runnable work exists inside the
+            # assigned scope by definition, so this is refused outright rather
+            # than trusted on the strength of an unverified scope_proof string.
+            if declared == "NO_ELIGIBLE_WORK" and row["status"] in (
+                    "running", "ready", "blocked"):
+                with write_txn(conn):
+                    _append_event(
+                        conn, task_id, "completion_blocked_noop",
+                        {"declared": declared, "status": row["status"],
+                         "reason": "NO_ELIGIBLE_WORK is inadmissible for a real task",
+                         "action": "execute the work or declare the true blocker"},
+                    )
+                raise NoOpCompletionError(
+                    f"{task_id}: NO_ELIGIBLE_WORK cannot close a "
+                    f"{row['status']} task — a real task's scope still contains "
+                    f"actionable work. Execute it, or declare "
+                    f"BLOCKED_WITH_EXACT_DEPENDENCY / "
+                    f"PARTIAL_CONTINUATION_REQUIRED / DUPLICATE_ALREADY_OWNED "
+                    f"instead. The card is untouched for your retry.")
+            try:
+                validate(Outcome(declared, summary=str(summary or ""),
+                                metadata=meta))
+            except OutcomeError as exc:
+                with write_txn(conn):
+                    _append_event(
+                        conn, task_id, "completion_blocked_bad_outcome",
+                        {"declared": declared, "error": str(exc)[:400]},
+                    )
+                raise NoOpCompletionError(
+                    f"{task_id}: declared outcome {declared!r} is missing required "
+                    f"evidence — {exc}")
+            return
+        if declared == "COMPLETED_WITH_VERIFIED_RESULT":
+            from hermes_cli.task_outcome_contract import (
+                Outcome, OutcomeError, validate)
+            try:
+                validate(Outcome(declared, summary=str(summary or ""),
+                                metadata=meta))
+            except OutcomeError as exc:
+                with write_txn(conn):
+                    _append_event(
+                        conn, task_id, "completion_blocked_unverified",
+                        {"declared": declared, "error": str(exc)[:400]},
+                    )
+                raise NoOpCompletionError(f"{task_id}: {exc}")
+            return
+
+    from hermes_cli.task_outcome_contract import (
+        FAILED_RETRYABLE, NO_ELIGIBLE, PARTIAL, classify, is_successful_completion)
+    outcome = classify(
+        summary or result or "",
+        is_real_task=True,
+        # Whether acceptance is unfinished is the CALLER's knowledge, not
+        # something readable from prose. When the caller has not declared an
+        # explicit outcome_state, do not infer unfinished criteria here: a
+        # genuine short completion ("got the thing done") carries no
+        # verification keywords and would be wrongly downgraded to PARTIAL.
+        acceptance_unfinished=False,
+        metadata=meta,
+    )
+    # The refusal set is deliberately narrow and evidence-based:
+    #   * an explicit no-op marker (nothing_to_do, idle, nothing actionable…)
+    #   * an explicit statement that verification was impossible
+    #   * an explicit COMPLETED declaration alongside a no-op marker
+    # Everything else is left to the pre-existing gates (parent satisfaction,
+    # phantom cards, artifact preservation, the goal judge). Over-refusing here
+    # broke legitimate short completions, which is a regression in the opposite
+    # direction and equally wrong.
+    if outcome.state not in (FAILED_RETRYABLE, PARTIAL):
+        return
+    if outcome.state == PARTIAL:
+        # PARTIAL is only reachable here when prose explicitly refutes
+        # verification ("could not verify", "allowlisted out"). A plain short
+        # summary lands in PARTIAL too, so only refuse when the contract found
+        # a refutation marker rather than merely missing keywords.
+        from hermes_cli.task_outcome_contract import _has_no_op_marker as _no_op_marker
+        from hermes_cli.task_outcome_contract import _verification_refuted
+        if not _verification_refuted(summary or result or "", *meta.values()):
+            return
+    if outcome.state == FAILED_RETRYABLE:
+        from hermes_cli.task_outcome_contract import _has_no_op_marker as _no_op_marker
+        if not _no_op_marker(summary or result or "", *meta.values()):
+            return
+    # NOTE: no audit event is written on this inferred-refusal path. The
+    # pre-existing gates write their own events, and an extra write_txn here
+    # contending for the same sqlite write lock measurably stalled the CLI
+    # completion path (tests/tools/test_kanban_descendant_scope.py subprocess
+    # hit its 45s timeout). The refusal is returned to the caller in the error
+    # message instead, which is the same information without the lock churn.
+    if outcome.state == NO_ELIGIBLE:
+        # Unreachable for a real task by construction; kept as a guard so a
+        # future edit cannot let an idle worker close a real card.
+        reason = ("a real task cannot be NO_ELIGIBLE_WORK; scope still contains "
+                  "actionable work")
+        action = "execute the work, or report the true blocker"
+    else:
+        reason = str(outcome.metadata.get("reason")
+                     or outcome.metadata.get("inferred")
+                     or "no evidence that the work was done")
+        action = str(outcome.metadata.get("action")
+                     or "retry with explicit evidence, or report a correct "
+                        "terminal classification")
+    # NOTE: no audit event is written on this inferred-refusal path. The
+    # pre-existing gates write their own events, and an extra write_txn here
+    # contending for the same sqlite write lock measurably stalled the CLI
+    # completion path (tests/tools/test_kanban_descendant_scope.py subprocess
+    # hit its 45s timeout). The refusal is returned to the caller in the error
+    # message instead, which carries the same information without lock churn.
+    raise NoOpCompletionError(
+        f"{task_id}: refused as a successful completion — {reason}. {action}. "
+        f"A no-op is not a successful task completion. Pass "
+        f"metadata={{'outcome_state': ...}} with the correct classification "
+        f"(BLOCKED_WITH_EXACT_DEPENDENCY needs dependency+wake_event; "
+        f"DUPLICATE_ALREADY_OWNED needs owner; PARTIAL_CONTINUATION_REQUIRED "
+        f"needs remaining) and the card stays untouched for your retry."
+        + ("" if outcome.state != PARTIAL else "")
+    )
+
+
 def _gate_empty_completion(
     conn: sqlite3.Connection,
     task_id: str,
     *,
     result: Optional[str],
     summary: Optional[str],
+    metadata: Optional[dict] = None,
 ) -> None:
     """Refuse a completion that would leave the card with no evidence.
 
     Review approvals are exempt: a human vouches for the card and
     ``_REVIEW_APPROVED_NOTE`` is the documented record.
+
+    A NO-OP IS NOT A SUCCESSFUL COMPLETION
+    --------------------------------------
+    This gate used to accept any non-empty prose, so a child that executed
+    ``nothing_to_do`` and returned ``ok:true`` closed the card as ``done`` with
+    the same result as a real verified completion. Measured before the repair:
+    all 10 probe cases in ``swarm/outcome_semantics_probe.py`` were accepted.
+
+    It now applies the shared contract in
+    :mod:`hermes_cli.task_outcome_contract`, which requires an explicit terminal
+    classification and, for ``COMPLETED_WITH_VERIFIED_RESULT``, evidence that
+    the destination actually changed. A worker that no-ops on a real task is
+    refused with a replan instruction instead of silently succeeding.
     """
+    _gate_outcome_contract(conn, task_id, result=result, summary=summary,
+                           metadata=metadata)
     row = conn.execute(
         "SELECT status, result FROM tasks WHERE id = ?",
         (task_id,),
