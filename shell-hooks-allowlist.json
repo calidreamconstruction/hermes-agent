@@ -1,0 +1,9 @@
+{
+  "approvals": [
+    {
+      "event": "post_tool_call",
+      "command": "\"/usr/bin/bash\" \"/opt/faressystem/bin/azani-ledger-write\" --worker hermes --stdin-json",
+      "approved_at": "20261002T190510Z"
+    }
+  ]
+}

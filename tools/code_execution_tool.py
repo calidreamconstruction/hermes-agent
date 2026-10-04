@@ -1101,6 +1101,23 @@ def execute_code(
     if not code or not code.strip():
         return tool_error("No code provided.")
 
+    # Non-bypassable protected-instruction gate (ported 2026-10-02 from
+    # calidreamconstruction/hermes-agent). Matches the direct file-tool
+    # boundary for arbitrary Python; runs before backend selection and the
+    # normal approval ladder so force/YOLO cannot silently rewrite
+    # agent-instruction files.
+    from tools.protected_instruction_gate import _check_protected_instruction_command
+    _instruction_block = _check_protected_instruction_command(
+        code, task_id or "default"
+    )
+    if _instruction_block:
+        return json.dumps({
+            "status": "error",
+            "error": _instruction_block,
+            "tool_calls_made": 0,
+            "duration_seconds": 0,
+        }, ensure_ascii=False)
+
     # Dispatch: remote backends use file-based RPC, local uses UDS
     from tools.terminal_tool import _get_env_config
     env_type = _get_env_config()["env_type"]

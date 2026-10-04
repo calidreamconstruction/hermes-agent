@@ -2058,6 +2058,21 @@ def terminal_tool(
                         env = new_env
                     logger.info("%s environment ready for task %s", env_type, effective_task_id[:8])
 
+        # Non-bypassable protected-instruction gate (ported 2026-10-02 from
+        # calidreamconstruction/hermes-agent). Runs before the ordinary
+        # approval ladder so force/YOLO cannot skip it.
+        from tools.protected_instruction_gate import _check_protected_instruction_command
+        _instruction_block = _check_protected_instruction_command(
+            command, task_id or "default"
+        )
+        if _instruction_block:
+            return json.dumps({
+                "output": "",
+                "exit_code": -1,
+                "error": _instruction_block,
+                "status": "blocked",
+            }, ensure_ascii=False)
+
         # Pre-exec security checks (tirith + dangerous command detection)
         # Skip check if force=True (user has confirmed they want to run it)
         approval_note = None
