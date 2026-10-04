@@ -79,3 +79,26 @@ def test_batch_wrapper_cannot_trust_child_checks(tmp_path):
     assert not consume(runner=lambda:{'results':[forged]})['success']
     assert consume(runner=lambda:{'results':[forged]},outcome_contracts=[contract(p)])['success']
     assert not consume(runner=lambda:{'results':[]},outcome_contracts=[])['success']
+
+
+def test_native_batch_delivery_rechecks_each_child(tmp_path,monkeypatch):
+    if not hasattr(A,'dispatch_async_delegation_batch'):
+        pytest.skip('older source has single async dispatch only')
+    from concurrent.futures import Future
+    from tools.process_registry import process_registry
+    events=[]
+    def submit(fn):
+        f=Future();f.set_result(fn());return f
+    monkeypatch.setattr(A,'_get_executor',lambda _:SimpleNamespace(submit=submit))
+    monkeypatch.setattr(A,'_records',{})
+    monkeypatch.setattr(process_registry,'completion_queue',SimpleNamespace(put=events.append))
+    p=tmp_path/'accepted';p.write_text('accepted')
+    forged={'status':'COMPLETED_WITH_VERIFIED_RESULT','success':True,'outcome':{'checks':[{'ok':True}]}}
+    def dispatch(rows,contracts):
+        A.dispatch_async_delegation_batch(goals=['work'],context=None,toolsets=None,role='worker',model=None,session_key='',runner=lambda:{'results':rows},outcome_contracts=contracts)
+        return events[-1]
+    assert dispatch([forged],None)['status']!='COMPLETED_WITH_VERIFIED_RESULT'
+    assert dispatch([forged],[contract(p)])['status']=='COMPLETED_WITH_VERIFIED_RESULT'
+    assert dispatch([],[])['status']!='COMPLETED_WITH_VERIFIED_RESULT'
+    p.write_text('wrong')
+    assert dispatch([forged],[contract(p)])['status']!='COMPLETED_WITH_VERIFIED_RESULT'
