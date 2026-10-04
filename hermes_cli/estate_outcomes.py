@@ -8,6 +8,28 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from copy import deepcopy
+
+
+def parent_checked_async(fn):
+    """Recheck delivery with dispatch-time acceptance, including batch children."""
+    @wraps(fn)
+    def checked(*args, **kwargs):
+        assigned = deepcopy(kwargs.pop('outcome_contract', None))
+        contracts = deepcopy(kwargs.pop('outcome_contracts', None))
+        runner = kwargs['runner']
+        def verified_runner():
+            raw = runner()
+            if isinstance(raw, dict) and isinstance(raw.get('results'), list):
+                rows = raw['results']
+                verified = [settle_result(row, contracts[i] if isinstance(contracts, list) and i < len(contracts) else None)
+                            for i, row in enumerate(rows)]
+                ok = bool(verified) and all(row['success'] for row in verified)
+                return dict(raw, results=verified, success=ok,
+                            status='COMPLETED_WITH_VERIFIED_RESULT' if ok else 'PARTIAL_CONTINUATION_REQUIRED')
+            return settle_result(raw, assigned)
+        return fn(*args, **dict(kwargs, runner=verified_runner))
+    return checked
 
 @lru_cache(maxsize=1)
 def _core():
@@ -39,7 +61,7 @@ def settle_result(result, assigned=None):
     task.setdefault('acceptance', ['assigned_child_acceptance'])
     task.update(kind='work', runnable_work=1)
     outcome = core.settle(task, claim, verifier=core.verify_acceptance)
-    return dict(original, execution_status=original.get('status'),
+    return dict(claim, execution_status=original.get('status'),
                 status=outcome['state'], success=outcome['success'], outcome=outcome)
 
 
