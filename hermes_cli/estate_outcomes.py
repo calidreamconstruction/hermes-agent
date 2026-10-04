@@ -27,6 +27,8 @@ def parent_checked_async(fn):
                 ok = (bool(verified) and isinstance(contracts, list)
                       and len(rows) == len(contracts)
                       and raw.get('success') is not False and raw.get('ok') is not False
+                      and all(_core().normalize(raw[key]) == _core().COMPLETED
+                              for key in ('state', 'status') if isinstance(raw.get(key), str))
                       and all(row['success'] for row in verified))
                 return dict(raw, results=verified, success=ok,
                             status='COMPLETED_WITH_VERIFIED_RESULT' if ok else 'PARTIAL_CONTINUATION_REQUIRED')
