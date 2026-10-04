@@ -3571,6 +3571,7 @@ def complete_task(
     metadata: Optional[dict] = None,
     created_cards: Optional[Iterable[str]] = None,
     expected_run_id: Optional[int] = None,
+    _estate_snapshot=None,
 ) -> bool:
     """Transition ``running|ready -> done`` and record ``result``.
 
@@ -3613,6 +3614,9 @@ def complete_task(
         )
         if phantom_cards:
             with write_txn(conn):
+                from hermes_cli.estate_outcomes import snapshot_matches
+                if not snapshot_matches(conn, task_id, _estate_snapshot):
+                    return False
                 _append_event(
                     conn, task_id, "completion_blocked_hallucination",
                     {
@@ -3630,6 +3634,9 @@ def complete_task(
         verified_cards = []
 
     with write_txn(conn):
+        from hermes_cli.estate_outcomes import snapshot_matches
+        if not snapshot_matches(conn, task_id, _estate_snapshot):
+            return False
         if expected_run_id is None:
             cur = conn.execute(
                 """
@@ -3724,6 +3731,9 @@ def complete_task(
         phantom_refs = [p for p in phantom_refs if p not in set(verified_cards)]
         if phantom_refs:
             with write_txn(conn):
+                from hermes_cli.estate_outcomes import snapshot_matches
+                if not snapshot_matches(conn, task_id, _estate_snapshot):
+                    return False
                 _append_event(
                     conn, task_id, "suspected_hallucinated_references",
                     {
@@ -4118,9 +4128,13 @@ def block_task(
     *,
     reason: Optional[str] = None,
     expected_run_id: Optional[int] = None,
+    _estate_snapshot=None,
 ) -> bool:
     """Transition ``running -> blocked``."""
     with write_txn(conn):
+        from hermes_cli.estate_outcomes import snapshot_matches
+        if not snapshot_matches(conn, task_id, _estate_snapshot):
+            return False
         if expected_run_id is None:
             cur = conn.execute(
                 """
@@ -5646,6 +5660,7 @@ def _record_task_failure(
     release_claim: bool = False,
     end_run: bool = False,
     event_payload_extra: Optional[dict] = None,
+    _estate_snapshot=None,
 ) -> bool:
     """Record a non-success outcome (spawn_failed / crashed / timed_out)
     and maybe trip the circuit breaker.
@@ -5685,6 +5700,9 @@ def _record_task_failure(
         failure_limit = DEFAULT_FAILURE_LIMIT
     blocked = False
     with write_txn(conn):
+        from hermes_cli.estate_outcomes import snapshot_matches
+        if not snapshot_matches(conn, task_id, _estate_snapshot):
+            return False
         row = conn.execute(
             "SELECT consecutive_failures, status, max_retries "
             "FROM tasks WHERE id = ?", (task_id,),

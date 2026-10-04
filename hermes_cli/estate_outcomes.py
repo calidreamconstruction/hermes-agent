@@ -24,7 +24,10 @@ def parent_checked_async(fn):
                 rows = raw['results']
                 verified = [settle_result(row, contracts[i] if isinstance(contracts, list) and i < len(contracts) else None)
                             for i, row in enumerate(rows)]
-                ok = bool(verified) and all(row['success'] for row in verified)
+                ok = (bool(verified) and isinstance(contracts, list)
+                      and len(rows) == len(contracts)
+                      and raw.get('success') is not False and raw.get('ok') is not False
+                      and all(row['success'] for row in verified))
                 return dict(raw, results=verified, success=ok,
                             status='COMPLETED_WITH_VERIFIED_RESULT' if ok else 'PARTIAL_CONTINUATION_REQUIRED')
             return settle_result(raw, assigned)
@@ -73,6 +76,14 @@ def parent_checked_child(fn):
     return checked
 
 
+def snapshot_matches(conn, task_id, snapshot):
+    """Called inside the native write transaction after potentially slow readback."""
+    if snapshot is None:
+        return True  # other native lifecycle callers retain their own fencing
+    row = conn.execute('SELECT body, current_run_id, status FROM tasks WHERE id=?', (task_id,)).fetchone()
+    return row is not None and all(row[key] == snapshot[key] for key in snapshot)
+
+
 def parent_checked_kanban(fn):
     @wraps(fn)
     def checked(conn, task_id, **kwargs):
@@ -91,7 +102,10 @@ def parent_checked_kanban(fn):
         assigned = body.get('outcome_contract', {}) if isinstance(body, dict) else {}
         claim = dict(kwargs.get('metadata') or {}, status='completed',
                      summary=kwargs.get('summary') or kwargs.get('result') or '')
+        snapshot = dict(row)
         settled = settle_result(claim, assigned)
+        if not snapshot_matches(conn, task_id, snapshot):
+            return False
         if not settled['success']:
             # Existing task event store is the durable child-result rail. No
             # terminal-success write, no dependency release, no new queue.
@@ -105,15 +119,15 @@ def parent_checked_kanban(fn):
             if outcome['state'] in ('FAILED_RETRYABLE', 'FAILED_TERMINAL'):
                 kb._record_task_failure(conn, task_id, json.dumps(outcome),
                     outcome=outcome['state'], failure_limit=3,
-                    release_claim=True, end_run=True)
+                    release_claim=True, end_run=True, _estate_snapshot=snapshot)
             else:
                 # Preserve exact continuation on the owning task and existing
                 # event store; blocked here never means successful completion.
                 if not outcome.get('wake_event'):
                     outcome['dependency'] = 'parent acceptance verifier for ' + task_id
                     outcome['wake_event'] = 'parent_verifier_available:' + task_id
-                kb.block_task(conn, task_id, reason=json.dumps(outcome), expected_run_id=expected)
+                kb.block_task(conn, task_id, reason=json.dumps(outcome), expected_run_id=expected, _estate_snapshot=snapshot)
             return False
         metadata = dict(kwargs.get('metadata') or {}, parent_outcome=settled['outcome'])
-        return fn(conn, task_id, **dict(kwargs, metadata=metadata))
+        return fn(conn, task_id, **dict(kwargs, metadata=metadata, _estate_snapshot=snapshot))
     return checked
