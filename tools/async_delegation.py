@@ -232,7 +232,10 @@ def dispatch_async_delegation(
         status = "error"
         try:
             result = runner() or {}
-            status = result.get("status") or "completed"
+            status = result.get("status") or "PARTIAL_CONTINUATION_REQUIRED"
+            if status == "completed":
+                status = "PARTIAL_CONTINUATION_REQUIRED"
+                result = dict(result, execution_status="completed", status=status, success=False)
         except Exception as exc:  # noqa: BLE001 — must never crash the worker
             logger.exception("Async delegation %s crashed", delegation_id)
             result = {

@@ -1450,6 +1450,9 @@ def _dump_subagent_timeout_diagnostic(
         return None
 
 
+from hermes_cli.estate_outcomes import parent_checked_child
+
+@parent_checked_child
 def _run_single_child(
     task_index: int,
     goal: str,
@@ -2245,6 +2248,7 @@ def delegate_task(
             )
             # Override with correct parent tool names (before child construction mutated global)
             child._delegate_saved_tool_names = _parent_tool_names
+            child._estate_outcome_contract = t.get("outcome_contract")
             children.append((i, t, child))
     finally:
         # Authoritative restore: reset global to parent's tool names after all children built

@@ -3559,6 +3559,9 @@ class HallucinatedCardsError(ValueError):
         )
 
 
+from hermes_cli.estate_outcomes import parent_checked_kanban
+
+@parent_checked_kanban
 def complete_task(
     conn: sqlite3.Connection,
     task_id: str,
