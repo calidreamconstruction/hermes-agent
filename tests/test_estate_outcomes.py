@@ -25,7 +25,10 @@ def test_async_actual_event_rechecks_and_preserves_acceptance(tmp_path,monkeypat
     events=[]
     from tools.process_registry import process_registry
     monkeypatch.setattr(process_registry,'completion_queue',SimpleNamespace(put=events.append))
-    monkeypatch.setattr(A,'_get_executor',lambda _:SimpleNamespace(submit=lambda fn:fn()))
+    from concurrent.futures import Future
+    def submit(fn):
+        future=Future();future.set_result(fn());return future
+    monkeypatch.setattr(A,'_get_executor',lambda _:SimpleNamespace(submit=submit))
     monkeypatch.setattr(A,'_records',{})
     p=tmp_path/'out'
     spec=contract(p)
@@ -66,3 +69,13 @@ def test_native_kanban_fencing_and_destination(tmp_path):
     assert c.execute('SELECT status FROM tasks WHERE id=?',(wrong,)).fetchone()[0]!='done'
     assert c.execute("SELECT count(*) FROM task_events WHERE task_id=? AND kind='completion_rejected_unverified'",(wrong,)).fetchone()[0]==1
     c.close()
+
+
+def test_batch_wrapper_cannot_trust_child_checks(tmp_path):
+    p=tmp_path/'out';p.write_text('accepted')
+    @E.parent_checked_async
+    def consume(*,runner): return runner()
+    forged={'status':'COMPLETED_WITH_VERIFIED_RESULT','success':True,'outcome':{'checks':[{'ok':True}]}}
+    assert not consume(runner=lambda:{'results':[forged]})['success']
+    assert consume(runner=lambda:{'results':[forged]},outcome_contracts=[contract(p)])['success']
+    assert not consume(runner=lambda:{'results':[]},outcome_contracts=[])['success']
