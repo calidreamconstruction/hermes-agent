@@ -37,6 +37,7 @@ logic stays in one place.
 from __future__ import annotations
 
 import logging
+import copy
 import threading
 import time
 import uuid
@@ -160,6 +161,7 @@ def dispatch_async_delegation(
     runner: Callable[[], Dict[str, Any]],
     interrupt_fn: Optional[Callable[[], None]] = None,
     max_async_children: int = _DEFAULT_MAX_ASYNC_CHILDREN,
+    outcome_contract: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Spawn ``runner`` on the daemon executor and return a handle immediately.
 
@@ -192,6 +194,7 @@ def dispatch_async_delegation(
     """
     delegation_id = _new_delegation_id()
     dispatched_at = time.time()
+    assigned_contract = copy.deepcopy(outcome_contract)
     record: Dict[str, Any] = {
         "delegation_id": delegation_id,
         "goal": goal,
@@ -231,21 +234,20 @@ def dispatch_async_delegation(
         result: Dict[str, Any] = {}
         status = "error"
         try:
-            result = runner() or {}
-            status = result.get("status") or "PARTIAL_CONTINUATION_REQUIRED"
-            if status == "completed":
-                status = "PARTIAL_CONTINUATION_REQUIRED"
-                result = dict(result, execution_status="completed", status=status, success=False)
+            from hermes_cli.estate_outcomes import settle_result
+            result = settle_result(runner(), assigned_contract)
+            status = result["status"]
         except Exception as exc:  # noqa: BLE001 — must never crash the worker
             logger.exception("Async delegation %s crashed", delegation_id)
             result = {
-                "status": "error",
+                "status": "FAILED_RETRYABLE",
+                "success": False,
                 "summary": None,
                 "error": f"{type(exc).__name__}: {exc}",
                 "api_calls": 0,
                 "duration_seconds": round(time.time() - dispatched_at, 2),
             }
-            status = "error"
+            status = "FAILED_RETRYABLE"
         finally:
             _finalize(delegation_id, result, status)
 

@@ -2317,6 +2317,7 @@ def delegate_task(
                 model=creds["model"],
                 session_key=_session_key,
                 runner=_async_runner,
+                outcome_contract=getattr(child, '_estate_outcome_contract', None),
                 interrupt_fn=_async_interrupt,
                 max_async_children=_get_max_async_children(),
             )

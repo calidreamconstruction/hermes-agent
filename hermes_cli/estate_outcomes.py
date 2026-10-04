@@ -20,7 +20,8 @@ def _core():
 
 def settle_result(result, assigned=None):
     core = _core()
-    claim = dict(result) if isinstance(result, dict) else {'state': 'failed', 'error': 'malformed child result'}
+    original = dict(result) if isinstance(result, dict) else {'state': 'failed', 'error': 'malformed child result'}
+    claim = dict(original)
     summary = claim.get('summary') or claim.get('final_response')
     if isinstance(summary, str):
         try:
@@ -29,11 +30,16 @@ def settle_result(result, assigned=None):
             structured = None
         if isinstance(structured, dict):
             claim.update(structured)
+    # Embedded prose/JSON cannot erase a transport failure or explicit no-op.
+    if core.normalize(original) in (core.RETRY, core.TERMINAL, core.NO_WORK):
+        claim['state'] = core.normalize(original)
+    if original.get('success') is False or original.get('ok') is False:
+        claim['success'] = False
     task = dict(assigned or {})
     task.setdefault('acceptance', ['assigned_child_acceptance'])
     task.update(kind='work', runnable_work=1)
     outcome = core.settle(task, claim, verifier=core.verify_acceptance)
-    return dict(result or {}, execution_status=(result or {}).get('status'),
+    return dict(original, execution_status=original.get('status'),
                 status=outcome['state'], success=outcome['success'], outcome=outcome)
 
 
@@ -52,6 +58,8 @@ def parent_checked_kanban(fn):
         if not row or row['status'] not in ('running', 'ready', 'blocked'):
             return False
         expected = kwargs.get('expected_run_id')
+        if row['current_run_id'] is not None and expected is None:
+            return False  # an unfenced caller cannot settle an owned run
         if expected is not None and row['current_run_id'] != expected:
             return False  # preserve another live owner's lease
         try:
