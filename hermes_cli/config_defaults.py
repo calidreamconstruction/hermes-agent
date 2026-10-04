@@ -433,6 +433,14 @@ DEFAULT_CONFIG = {
         "inactivity_timeout": 120,
         "command_timeout": 30,  # seconds per browser command (screenshot, navigate, etc.)
         "snapshot_threshold": 15000,  # max chars before snapshot truncate-and-store (min 1000)
+        # Wave-02 item 519: reload-and-retry attempts after a failed navigate (clamped 0-5).
+        "navigate_retries": 2,
+        # Wave-02 item 517: a bot/Cloudflare-challenged page is NOT a completed navigation.
+        # "fail" (default) returns success:false; "warn" keeps the legacy success:true + flag.
+        "bot_challenge_action": "fail",
+        # Wave-02 item 513: after a successful write, read the value back and report
+        # write_verified. A probe failure is recorded as a skip, never as a failed write.
+        "readback_on_write": True,
         "record_sessions": False,  # auto-record browser sessions as WebM videos
         # headed: visible Chromium window (local); skips per-turn cleanup, idle reaper still applies
         "headed": False,

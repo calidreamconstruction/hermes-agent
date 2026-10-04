@@ -12,6 +12,17 @@ from unittest.mock import patch
 from tools.browser_tool import browser_type
 
 
+def _fill_call(mock_run):
+    """The fill (write) call specifically.
+
+    browser_type now also issues a readback ``get value`` probe after a successful
+    write (wave-02 item 513), so these success-path tests select the fill call
+    instead of asserting it was the only call. What they verify -- the RAW value
+    reaches the browser -- is unchanged.
+    """
+    return [c for c in mock_run.call_args_list if c.args[1] == "fill"][0]
+
+
 def test_browser_type_redacts_api_key_in_output(monkeypatch):
     monkeypatch.delenv("CAMOFOX_URL", raising=False)
     monkeypatch.delenv("BROWSER_CDP_URL", raising=False)
@@ -28,8 +39,7 @@ def test_browser_type_redacts_api_key_in_output(monkeypatch):
     assert secret not in json.dumps(result)
     assert result["typed"].startswith("sk-pro")
     # Raw secret still typed into the page.
-    mock_run.assert_called_once()
-    assert mock_run.call_args.args[2] == ["@apikey", secret]
+    assert _fill_call(mock_run).args[2] == ["@apikey", secret]
 
 
 def test_browser_type_keeps_normal_text_in_output(monkeypatch):
@@ -46,8 +56,7 @@ def test_browser_type_keeps_normal_text_in_output(monkeypatch):
 
     assert result["success"] is True
     assert result["typed"] == text
-    mock_run.assert_called_once()
-    assert mock_run.call_args.args[2] == ["@search", text]
+    assert _fill_call(mock_run).args[2] == ["@search", text]
 
 
 def test_browser_type_failure_redacts_api_key_in_error(monkeypatch):

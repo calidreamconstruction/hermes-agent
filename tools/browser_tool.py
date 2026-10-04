@@ -684,6 +684,116 @@ _BOT_DETECTION_TITLE_PATTERNS = (
     "just a moment", "attention required",
 )
 
+# Item 515: URL path/query fragments that mean the site bounced us to a login wall.
+_LOGIN_URL_MARKERS = (
+    "/login", "/signin", "/sign-in", "/log-in", "/auth", "/authenticate", "/sso",
+    "/oauth", "/oauth2", "/authorize", "/session", "/account/login", "/users/sign_in",
+    "/password", "/verify-identity", "/challenge",
+)
+
+# Item 515: page text that means a login wall is being shown even without a URL change.
+_LOGIN_BODY_MARKERS = (
+    "please log in", "please sign in", "sign in to continue", "log in to continue",
+    "you must log in", "you must sign in", "session expired", "please sign in to",
+    "login required", "authentication required", "your session has expired",
+)
+
+# Item 505: pre-flight auth-expiry probe -- these mean the stored session is no longer
+# good even though the page itself loaded fine (the false-success shape: HTTP 200 +
+# a login/session-expired body, so navigation "succeeds" but nothing is authenticated).
+_AUTH_EXPIRED_MARKERS = (
+    "session expired", "your session has expired", "session has timed out",
+    "please re-authenticate", "reauthentication required", "authentication expired",
+    "your login has expired", "token expired", "credentials have expired",
+    "please sign in again", "you have been logged out", "session ended",
+)
+
+# Item 521: agent-browser errors that mean "the element you targeted moved / was
+# re-rendered", i.e. a stale ref rather than a genuinely missing element.
+_STALE_DETACHMENT_MARKERS = (
+    "not attached to the dom", "stale element", "no longer attached",
+    "element is not attached", "target closed", "node is detached",
+    "execution context was destroyed", "cannot find context with specified id",
+)
+
+_BOT_CHALLENGE_HINT = (
+    "Options: 1) Try adding delays between actions, 2) Access different pages first, "
+    "3) Enable advanced stealth (BROWSERBASE_ADVANCED_STEALTH=true, requires Scale plan), "
+    "4) Some sites have very aggressive bot detection that may be unavoidable."
+)
+
+DEFAULT_NAVIGATE_RETRIES = 2
+MAX_NAVIGATE_RETRIES = 5
+MAX_STALE_REFIND_ATTEMPTS = 3
+
+
+def _get_navigate_retries() -> int:
+    """``browser.navigate_retries`` (0-5; default 2): reload-and-retry attempts after a
+    failed ``open``. Clamped so a typo cannot turn a navigation into a retry storm."""
+    return _browser_cfg(
+        "navigate_retries", DEFAULT_NAVIGATE_RETRIES,
+        lambda v: DEFAULT_NAVIGATE_RETRIES if v is None else max(0, min(MAX_NAVIGATE_RETRIES, int(v))),
+        "browser.navigate_retries",
+    )
+
+
+def _bot_challenge_action() -> str:
+    """``browser.bot_challenge_action``: ``fail`` (default -- a challenged page is NOT a
+    completed navigation) or ``warn`` (legacy: keep ``success: true`` and only flag it)."""
+    val = _browser_cfg("bot_challenge_action", "fail", lambda v: v, "browser.bot_challenge_action")
+    val = (val or "fail").strip().lower()
+    return val if val in {"fail", "warn"} else "fail"
+
+
+def _readback_on_write() -> bool:
+    """``browser.readback_on_write`` (default on): verify a write by reading the value back."""
+    return _browser_cfg("readback_on_write", True, lambda v: True if v is None else bool(v), "browser.readback_on_write")
+
+
+def _challenge_patterns_in_title(title: str) -> list:
+    """Bot-detection patterns present in ``title`` (empty when the page looks normal)."""
+    title_lower = (title or "").lower()
+    return [p for p in _BOT_DETECTION_TITLE_PATTERNS if p in title_lower]
+
+
+def _login_redirect_markers(requested_url: str, final_url: str) -> list:
+    """Item 515: markers showing ``final_url`` is a login wall reached from ``requested_url``.
+    Empty when either URL is missing/unparseable or the hop stayed on the requested page."""
+    from urllib.parse import urlsplit
+    if not requested_url or not final_url:
+        return []
+    try:
+        req, fin = urlsplit(requested_url), urlsplit(final_url)
+    except ValueError:
+        return []
+    target = (fin.path + "?" + (fin.query or "")).lower()
+    if any(m in target for m in _LOGIN_URL_MARKERS):
+        return [f"url:{m}" for m in _LOGIN_URL_MARKERS if m in target]
+    # Same host, different page, and the target page is recognisably an auth surface.
+    if req.netloc and fin.netloc == req.netloc and req.path != fin.path:
+        page = fin.path.lower()
+        if any(k in page for k in ("login", "signin", "sign-in", "log-in", "auth", "sso", "oauth")):
+            return [f"path:{page}"]
+    return []
+
+
+def _auth_expiry_markers(page_text: str) -> list:
+    """Item 505: auth-expiry markers in already-fetched page text (no extra network call)."""
+    text = (page_text or "").lower()
+    return [m for m in _AUTH_EXPIRED_MARKERS if m in text]
+
+
+def _login_markers_in_text(page_text: str) -> list:
+    """Login-wall markers in page text."""
+    text = (page_text or "").lower()
+    return [m for m in _LOGIN_BODY_MARKERS if m in text]
+
+
+def _is_stale_detachment_error(error: str) -> bool:
+    """Item 521: True when a failed fill/click failed because the node was detached."""
+    text = (error or "").lower()
+    return any(marker in text for marker in _STALE_DETACHMENT_MARKERS)
+
 
 def _post_redirect_block(nav_session_key: str, url: str, final_url: str, auto_local_this_nav: bool) -> Optional[str]:
     """Post-redirect SSRF check; blocked JSON payload or None. The page is moved to about:blank
@@ -766,10 +876,23 @@ def browser_navigate(url: str, task_id: Optional[str] = None) -> str:
         session_info["_first_nav"] = False
         _maybe_start_recording(nav_session_key)
 
+    # Item 519: a failed ``open`` is retried after a bounded reload, so a transient
+    # navigation failure (daemon race, dropped connection) is recovered automatically
+    # instead of surfacing as a hard error. Bounded by ``browser.navigate_retries`` (0-5,
+    # default 2) and never retried for a block/error that would just repeat.
     result = _session._run_browser_command(nav_session_key, "open", [url],
                                   timeout=_get_open_command_timeout(first_open=is_first_nav))
+    nav_retries = 0
     if not result.get("success"):
-        return _dumps(_err(result.get("error", "Navigation failed")))
+        result, nav_retries = _retry_navigation_with_reload(
+            nav_session_key, url, result, first_open=is_first_nav)
+        if not result.get("success"):
+            failure = _err(result.get("error", "Navigation failed"))
+            if nav_retries:
+                # Preserve the retry trail: a caller must be able to tell a retried
+                # failure from one that failed on the first attempt.
+                failure["navigation_retries"] = nav_retries
+            return _dumps(failure)
 
     data = result.get("data", {})
     title = data.get("title", "")
@@ -779,6 +902,8 @@ def browser_navigate(url: str, task_id: Optional[str] = None) -> str:
         return blocked
 
     response = {"success": True, "url": final_url, "title": title}
+    if nav_retries:
+        response["navigation_retries"] = nav_retries
     features = session_info.get("features") or {}
     if features.get("real_profile"):  # auditability: this ran on the user's real-profile copy-browser
         response["used_real_profile"] = True
@@ -787,8 +912,127 @@ def browser_navigate(url: str, task_id: Optional[str] = None) -> str:
     _last_active_session_key[effective_task_id] = nav_session_key
     _lp._copy_fallback_warning(response, result)
     _add_navigate_warnings(response, title, session_info if is_first_nav else None)
+    # Snapshot first: items 515/505 probe the text this call ALREADY fetches, so the
+    # login/expired-auth detectors cost nothing extra.
     _attach_auto_snapshot(response, nav_session_key)
+    _annotate_navigation_outcome(response, url, final_url, nav_session_key)
     return _dumps(response)
+
+
+def _page_probe_text(response: Dict[str, Any]) -> str:
+    """Text the page already produced (the compact snapshot attached by this navigate).
+    Empty when the snapshot was unavailable -- the detectors then stay silent rather
+    than invent a verdict, and never trigger a fetch of their own."""
+    parts = [response.get(k) for k in ("snapshot", "title", "url")]
+    return "\n".join(str(p) for p in parts if p)
+
+
+def _retry_navigation_with_reload(
+    nav_session_key: str, url: str, first_result: Dict[str, Any], *, first_open: bool = False
+) -> tuple:
+    """Item 519: reload the page and retry ``open`` after a failed navigation.
+
+    Returns ``(result, retries_used)``. ``result`` is the FIRST result unchanged when
+    retry is disabled, the number of attempts is spent, or the error is not a transient
+    navigation failure -- so a hard failure keeps surfacing exactly as it did before.
+    """
+    result = first_result
+    error = str(result.get("error", "") or "")
+    retries = _get_navigate_retries()
+    if retries <= 0 or not _is_retryable_navigation_error(error):
+        return result, 0
+
+    used = 0
+    for _ in range(retries):
+        # Reload first: the failure is often a dead/half-open page rather than a bad URL.
+        _session._run_browser_command(nav_session_key, "reload", [], timeout=_get_open_command_timeout())
+        attempt = _session._run_browser_command(nav_session_key, "open", [url],
+                                                timeout=_get_open_command_timeout(first_open=first_open))
+        used += 1
+        if attempt.get("success"):
+            return attempt, used
+        if not _is_retryable_navigation_error(str(attempt.get("error", "") or "")):
+            return attempt, used
+        result = attempt
+    return result, used
+
+
+def _is_retryable_navigation_error(error: str) -> bool:
+    """True when reloading and retrying could plausibly fix the failure. Policy blocks,
+    SSRF refusals and post-redirect blocks are decided upstream and are never retried."""
+    text = (error or "").lower()
+    if any(marker in text for marker in (
+            "blocked", "not allowed", "policy", "ssrf", "private", "denied", "unsafe")):
+        return False
+    return any(marker in text for marker in (
+        "timeout", "timed out", "econnreset", "connection reset", "closed", "disconnect",
+        "no active tab", "no such tab", "target closed", "session closed", "websocket",
+        "not connected", "daemon", "unreachable", "network error", "empty reply",
+        "execution context", "capability", "chrome", "transport", "broken pipe",
+    ))
+
+
+def _annotate_navigation_outcome(response: Dict[str, Any], requested_url: str, final_url: str,
+                                 nav_session_key: str) -> None:
+    """Items 517/515/505: make a navigation report what it actually achieved.
+
+    A bot-challenged page, a login redirect and an expired session all returned
+    ``success: true`` before, which is the false-success this closes. Diagnostics already
+    attached to ``response`` are preserved. This never raises and never adds an external
+    network call: it reads the snapshot the page already produced, when one exists.
+    """
+    title = str(response.get("title") or "")
+
+    # Item 505 pre-flight probe: the page loaded, but is the session still authenticated?
+    probe_text = _page_probe_text(response)
+    if probe_text:
+        expired = _auth_expiry_markers(probe_text)
+        if expired:
+            response["auth_expired"] = True
+            response["auth_expired_markers"] = expired
+            response["auth_expiry_warning"] = (
+                "The page loaded but reports an expired/invalid session -- this navigation is "
+                "NOT an authenticated page load. Re-authenticate before acting on this session. "
+                f"Markers: {expired}"
+            )
+
+    # Item 515: did the site bounce us to a login wall?
+    login_url_markers = _login_redirect_markers(requested_url, final_url)
+    login_text_markers = _login_markers_in_text(probe_text) if probe_text else []
+    if login_url_markers or login_text_markers:
+        response["login_redirect"] = True
+        response["login_redirect_markers"] = login_url_markers + login_text_markers
+        response["requested_url"] = requested_url
+        response["login_redirect_warning"] = (
+            f"Navigation to {requested_url} ended at {final_url}, which looks like a login/auth "
+            f"page. The page loaded but you are NOT logged in; treat any content as the login "
+            f"screen, not the requested page. Markers: "
+            f"{login_url_markers + login_text_markers}"
+        )
+
+    # Item 517: the decisive gate. A bot challenge is not a completed navigation.
+    challenge_patterns = _challenge_patterns_in_title(title)
+    if not challenge_patterns and response.get("bot_detection_warning"):
+        # Already flagged by title; keep the pattern list as structured evidence.
+        challenge_patterns = _challenge_patterns_in_title(title)
+    if challenge_patterns:
+        response["bot_detection_warning"] = response.get("bot_detection_warning") or (
+            f"Page title '{title}' suggests bot detection. The site may have blocked this request. "
+            + _BOT_CHALLENGE_HINT
+        )
+        response["bot_detection_patterns"] = challenge_patterns
+        response["bot_challenged"] = True
+        response["error"] = (
+            f"Navigation to {requested_url} was intercepted by a bot-detection challenge "
+            f"(page title '{title}'). The page did NOT load. Markers: {challenge_patterns}. "
+            + _BOT_CHALLENGE_HINT
+        )
+        if _bot_challenge_action() == "fail":
+            # Report the truth instead of a completed navigation. All diagnostics above
+            # (url/title/snapshot/login markers) stay attached.
+            response["success"] = False
+            response["status"] = "challenged"
+            response["challenged"] = True
 
 
 def _add_navigate_warnings(response: Dict[str, Any], title: str, first_nav_session: Optional[Dict[str, Any]]) -> None:
@@ -900,15 +1144,95 @@ def browser_type(ref: str, text: str, task_id: Optional[str] = None) -> str:
         return blocked
     ref = _at_ref(ref)
     result = _session._run_browser_command(effective_task_id, "fill", [ref, text])
+    refill_attempts = 0
+    # Item 521: a detached/stale node is a re-find problem, not a dead end. Re-resolve the
+    # element (the page re-rendered) and retry, bounded, before giving up.
+    if not result.get("success") and _is_stale_detachment_error(result.get("error", "")):
+        result, refill_attempts = _retry_fill_after_stale_refind(effective_task_id, ref, text, result)
     from agent.display import redact_browser_typed_text_for_display, redact_tool_args_for_display
     # Typed text goes through the secret-pattern redactor so API keys / tokens don't
     # leak into tool progress or chat history (the raw value already went to the browser).
     display_text = (redact_tool_args_for_display("browser_type", {"text": text}) or {})["text"]
     if result.get("success"):
         response = {"success": True, "typed": display_text, "element": ref}
+        if refill_attempts:
+            response["stale_refind_attempts"] = refill_attempts
+        # Item 513: a write is only "done" once the DOM agrees. Reading the value back is
+        # the same browser command channel already in use -- no new external call.
+        _attach_write_readback(response, effective_task_id, ref, text)
     else:
         response = _err(result.get("error", f"Failed to type into {ref}"))
+        if refill_attempts:
+            response["stale_refind_attempts"] = refill_attempts
     return _dumps(redact_browser_typed_text_for_display(_lp._copy_fallback_warning(response, result), text))
+
+
+def _retry_fill_after_stale_refind(
+    task_key: str, ref: str, text: str, first_result: Dict[str, Any]
+) -> tuple:
+    """Item 521: re-find the element and retry the fill after a stale-detachment error.
+
+    Returns ``(result, attempts_used)``. The original failure is returned unchanged when
+    the error is not a detachment, so genuine write failures surface exactly as before.
+    """
+    result = first_result
+    if not _is_stale_detachment_error(str(result.get("error", "") or "")):
+        # Not a detachment: this is a genuine write failure and must surface unchanged.
+        return result, 0
+
+    attempts = 0
+    for _ in range(MAX_STALE_REFIND_ATTEMPTS):
+        # A fresh snapshot refreshes the ref table so the next fill targets the live node.
+        _session._run_browser_command(task_key, "snapshot", ["-c"])
+        retry = _session._run_browser_command(task_key, "fill", [ref, text])
+        attempts += 1
+        if retry.get("success"):
+            return retry, attempts
+        if not _is_stale_detachment_error(str(retry.get("error", "") or "")):
+            return retry, attempts
+        result = retry
+    return result, attempts
+
+
+def _attach_write_readback(response: Dict[str, Any], task_key: str, ref: str, expected: str) -> None:
+    """Item 513: read the field back and record whether the write actually landed.
+
+    Never raises and never flips ``success``: a readback that cannot run (feature
+    unsupported, command failed) records why it was skipped instead of hiding it, and a
+    genuine mismatch is reported as ``write_verified: false`` with the expected/observed
+    lengths rather than the values themselves, so typed secrets stay out of the response.
+    """
+    if not _readback_on_write():
+        response["write_readback"] = {"performed": False, "reason": "browser.readback_on_write is off"}
+        return
+    try:
+        # Short timeout on purpose: a verification probe must never be the reason a
+        # completed write looks slow. A timeout is recorded as a skipped probe.
+        read = _session._run_browser_command(task_key, "get", ["value", ref], timeout=15)
+    except Exception as exc:  # a probe failure must not break a write that already succeeded
+        response["write_readback"] = {"performed": False, "reason": f"readback command failed: {exc}"}
+        return
+    if not read.get("success"):
+        # Not every build exposes ``get value``; that is a skipped probe, not a bad write.
+        response["write_readback"] = {
+            "performed": False, "reason": str(read.get("error") or "readback unavailable"),
+        }
+        return
+    data = read.get("data") or {}
+    observed = data.get("value", data.get("text"))
+    if observed is None:
+        response["write_readback"] = {"performed": False, "reason": "readback returned no value field"}
+        return
+    matches = str(observed) == expected
+    response["write_verified"] = matches
+    response["write_readback"] = {"performed": True, "matches": matches,
+                                  "expected_length": len(expected), "observed_length": len(str(observed))}
+    if not matches:
+        response["write_verification_warning"] = (
+            f"The field {ref} did not take the value that was typed "
+            f"(expected {len(expected)} chars, found {len(str(observed))}). The page may have "
+            "rejected, masked or reformatted the input -- confirm before relying on this write."
+        )
 
 
 def browser_scroll(direction: str, task_id: Optional[str] = None) -> str:
