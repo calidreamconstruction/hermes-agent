@@ -318,6 +318,8 @@ def _push_completion_event(
         "model": result.get("model") or record.get("model"),
         "status": status,
         "summary": summary,
+        "outcome": result.get("outcome"),
+        "success": result.get("success") is True and status == "COMPLETED_WITH_VERIFIED_RESULT",
         "error": error,
         "api_calls": result.get("api_calls", 0),
         "duration_seconds": result.get(

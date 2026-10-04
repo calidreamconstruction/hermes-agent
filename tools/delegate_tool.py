@@ -3022,6 +3022,10 @@ DELEGATE_TASK_SCHEMA = {
                     "type": "object",
                     "properties": {
                         "goal": {"type": "string", "description": "Task goal"},
+                        "outcome_contract": {
+                            "type": "object",
+                            "description": "Parent-assigned acceptance set before execution. Include acceptance entries with id, kind (file_exists/file_contains/file_sha256), absolute path and contains/sha256. Read-only tasks set requires_change=false. Missing checks remain unverified.",
+                        },
                         "context": {
                             "type": "string",
                             "description": "Task-specific context",
