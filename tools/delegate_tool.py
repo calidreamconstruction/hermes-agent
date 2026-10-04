@@ -1450,9 +1450,6 @@ def _dump_subagent_timeout_diagnostic(
         return None
 
 
-from hermes_cli.estate_outcomes import parent_checked_child
-
-@parent_checked_child
 def _run_single_child(
     task_index: int,
     goal: str,
@@ -1929,6 +1926,12 @@ def _run_single_child(
         )[:40]
 
         _output_tail = _extract_output_tail(result, max_entries=8, max_chars=600)
+
+        # Emit the parent's checked outcome, not the child's process status.
+        from hermes_cli.estate_outcomes import settle_result
+        checked_entry = settle_result(entry, getattr(child, '_estate_outcome_contract', None))
+        status = checked_entry['status']
+        entry.update(checked_entry)
 
         complete_kwargs: Dict[str, Any] = {
             "preview": summary[:160] if summary else entry.get("error", ""),

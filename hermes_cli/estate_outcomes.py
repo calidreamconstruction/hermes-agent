@@ -11,7 +11,7 @@ from pathlib import Path
 
 @lru_cache(maxsize=1)
 def _core():
-    root = Path(os.environ.get('FARESSYSTEM_ROOT', '/opt/faressystem'))
+    root = Path(os.environ.get('FARESSYSTEM_ROOT', 'C:/FaresSystem' if os.name == 'nt' else '/opt/faressystem'))
     spec = importlib.util.spec_from_file_location('azani_parent_outcome', root/'tools/outcome.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -70,6 +70,19 @@ def parent_checked_kanban(fn):
                          (task_id, row['current_run_id'], 'completion_rejected_unverified',
                           json.dumps(settled['outcome']), int(time.time())))
             conn.commit()
+            from hermes_cli import kanban_db as kb
+            outcome = settled['outcome']
+            if outcome['state'] in ('FAILED_RETRYABLE', 'FAILED_TERMINAL'):
+                kb._record_task_failure(conn, task_id, json.dumps(outcome),
+                    outcome=outcome['state'], failure_limit=3,
+                    release_claim=True, end_run=True)
+            else:
+                # Preserve exact continuation on the owning task and existing
+                # event store; blocked here never means successful completion.
+                if not outcome.get('wake_event'):
+                    outcome['dependency'] = 'parent acceptance verifier for ' + task_id
+                    outcome['wake_event'] = 'parent_verifier_available:' + task_id
+                kb.block_task(conn, task_id, reason=json.dumps(outcome), expected_run_id=expected)
             return False
         metadata = dict(kwargs.get('metadata') or {}, parent_outcome=settled['outcome'])
         return fn(conn, task_id, **dict(kwargs, metadata=metadata))
