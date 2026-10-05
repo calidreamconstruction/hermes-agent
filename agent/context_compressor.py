@@ -1921,6 +1921,23 @@ def _summarize_tool_result_unguarded(tool_name: str, tool_args: str, tool_conten
     """Build the summary line (unguarded; see ``_summarize_tool_result``)."""
     args = _json_dict(tool_args)
     content = tool_content or ""
+    # Outcome preservation follows NousResearch/hermes-agent context_compressor.py
+    # refusal-summary contract: an approval refusal is not an executed action.
+    # Inspect only the result envelope, never text embedded in successful output.
+    outcome = _json_dict(content)
+    status = outcome.get("status")
+    refusal = outcome.get("error")
+    refusal = refusal if isinstance(refusal, str) else ""
+    raw_block = isinstance(content, str) and content.lstrip().startswith("BLOCKED")
+    if status in ("blocked", "pending_approval") or raw_block or refusal.lstrip().startswith("BLOCKED"):
+        pending = status == "pending_approval"
+        label = "awaiting approval, not run" if pending else "BLOCKED, not run"
+        denial = refusal + (content if raw_block else "")
+        if not pending and "NOT consented" in denial:
+            label += "; user did NOT consent; do not retry or pursue an equivalent action"
+        target = _str_arg(args, "command") or _str_arg(args, "path")
+        # Put the outcome first so long tool identities cannot truncate it away.
+        return (label + " [" + str(tool_name)[:60] + "] " + target[:60])[:_PRUNE_MIN_CHARS - 1]
     content_len = len(content)
     line_count = content.count("\n") + 1 if content.strip() else 0
     summarizer = _TOOL_RESULT_SUMMARIZERS.get(tool_name)
