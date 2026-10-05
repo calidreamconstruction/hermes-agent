@@ -71,7 +71,7 @@ from hermes_cli.update_cmd_zip import (  # noqa: F401
     _update_via_zip, _zip_overlay_block_reason)
 from hermes_cli.update_cmd_stash import (  # noqa: F401
     _AUTOSTASH_NAME_PREFIX, _AUTOSTASH_WARN_AGE_DAYS, _clear_pending_autostash,
-    _discard_stashed_changes,
+    _discard_stashed_changes, _refuse_overlapping_local_update,
     _git_untracked_paths, _park_stashed_changes, _print_stash_cleanup_guidance,
     _reject_unsafe_stash_restore, _resolve_stash_selector, _restore_stashed_changes,
     _restored_python_paths, _stash_apply_failed_only_on_existing_untracked,
@@ -1061,6 +1061,7 @@ def _prepare_checkout_for_update(
     if target_ref is None:
         target_ref = f"origin/{branch}"
     release_tag = target_ref != f"origin/{branch}"
+    _refuse_overlapping_local_update(git_cmd, _m().PROJECT_ROOT, target_ref)
     if release_tag:
         # A release lands detached at its exact commit, never merges into or
         # rewrites the user's branch. Branch-policy machinery is main-only.
