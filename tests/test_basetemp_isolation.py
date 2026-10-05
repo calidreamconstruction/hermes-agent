@@ -99,3 +99,55 @@ def test_relocation_root_sweeps_basetemps_of_killed_runs_and_keeps_live_ones(tmp
         os.utime(p, (ancient, ancient))
     assert suite_conftest._pytest_disk_temp_root(native) == root
     assert not dead.exists() and live.exists()
+
+
+def test_existing_custom_state_home_is_protected_before_collection(tmp_path, monkeypatch):
+    import sqlite3
+    custom = tmp_path / "custom-owner-home"
+    custom.mkdir()
+    with sqlite3.connect(custom / "state.db") as conn:
+        conn.execute("CREATE TABLE existing_owner_input(id INTEGER PRIMARY KEY)")
+    monkeypatch.delenv("HERMES_TEST_SANDBOX_HOME", raising=False)
+    assert suite_conftest._hermes_home_points_at_production(str(custom)) is True
+
+
+def test_explicit_custom_integration_sandbox_remains_reusable(tmp_path, monkeypatch):
+    import sqlite3
+    custom = tmp_path / "custom-integration-home"
+    custom.mkdir()
+    with sqlite3.connect(custom / "state.db") as conn:
+        conn.execute("CREATE TABLE fixture_input(id INTEGER PRIMARY KEY)")
+    monkeypatch.setenv("HERMES_TEST_SANDBOX_HOME", str(custom))
+    assert suite_conftest._hermes_home_points_at_production(str(custom)) is False
+    # The marker does not override the platform-default production boundary.
+    import hermes_state_guard
+    monkeypatch.setattr(hermes_state_guard, "_real_platform_state_root", lambda: custom)
+    assert suite_conftest._hermes_home_points_at_production(str(custom)) is True
+
+
+def test_async_collection_preserves_existing_custom_store(tmp_path):
+    import hashlib
+    import os
+    import sqlite3
+    import subprocess
+    import sys
+    custom = tmp_path / "custom-owner-home"
+    custom.mkdir()
+    db = custom / "state.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE existing_owner_input(id INTEGER PRIMARY KEY, source_ref TEXT)")
+        conn.execute("INSERT INTO existing_owner_input VALUES(1, 'preserved-source')")
+    before = hashlib.sha256(db.read_bytes()).hexdigest()
+    env = dict(os.environ, HERMES_HOME=str(custom), PYTEST_DISABLE_PLUGIN_AUTOLOAD="1")
+    for key in ("HERMES_TEST_SANDBOX_HOME", "HERMES_TEST_ISOLATION", "HERMES_REAL_HOME", "HERMES_STATE_DB_GUARD_BYPASS"):
+        env.pop(key, None)
+    run = subprocess.run(
+        [sys.executable, "-m", "pytest", "tests/tools/test_async_delegation.py", "--collect-only", "-q", "-p", "no:cacheprovider"],
+        cwd=suite_conftest.PROJECT_ROOT, env=env, capture_output=True, text=True, timeout=45,
+    )
+    assert run.returncode == 0, run.stderr[-1000:]
+    assert "tests collected" in run.stdout
+    assert hashlib.sha256(db.read_bytes()).hexdigest() == before
+    with sqlite3.connect(db.as_uri() + "?mode=ro", uri=True) as conn:
+        assert conn.execute("SELECT * FROM existing_owner_input").fetchall() == [(1, "preserved-source")]
+        assert conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall() == [("existing_owner_input",)]

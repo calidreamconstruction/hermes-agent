@@ -94,7 +94,16 @@ def _hermes_home_points_at_production(value: str) -> bool:
     if resolved == real_root:
         return True
     # Profile home directly under the production root: <root>/profiles/<name>
-    return resolved.parent.name == "profiles" and resolved.parent.parent == real_root
+    if resolved.parent.name == "profiles" and resolved.parent.parent == real_root:
+        return True
+    # A configured live home need not equal the platform default (for
+    # example a service can use a separate data volume). Collection imports
+    # reconcile state.db before autouse fixtures run. Never reuse an existing
+    # custom store merely because its path is non-default.
+    if (resolved / "state.db").exists():
+        sandbox = os.environ.get("HERMES_TEST_SANDBOX_HOME", "")
+        return not sandbox or Path(sandbox).expanduser().resolve() != resolved
+    return False
 
 
 # ``import hermes_bootstrap`` (transitively: any entry-point module) runs
