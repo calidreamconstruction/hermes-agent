@@ -87,3 +87,49 @@ def test_candidate_preflight_reports_exact_overlap_without_mutation(tmp_path,cas
     assert (tmp_path/path).read_text()=='native preserved\n'
     assert (tmp_path/'.git/index').read_bytes()==index
     assert git(tmp_path,'rev-parse','HEAD')==before
+
+
+"""Regression from independent review: retain index and worktree independently."""
+@pytest.mark.parametrize('case', ['cancelled','deletion','rename_from','rename_to'])
+@pytest.mark.parametrize('overlap', [True, False])
+def test_update_preserves_index_and_worktree(update_tree, monkeypatch, case, overlap):
+    t=update_tree
+    monkeypatch.setenv('HERMES_GATEWAY_LOCK_DIR', str(t.clone.parent/'host-state'))
+    monkeypatch.setattr('hermes_cli.update_owning_install.retarget_to_owning_install',lambda *_:None)
+    for name in ('owned.py','unrelated.py'):
+        (t.origin/name).write_text('base\n')
+    git(t.origin,'add','owned.py','unrelated.py');git(t.origin,'commit','-qm','base owned')
+    git(t.clone,'fetch','origin');git(t.clone,'checkout','--detach','origin/main')
+    head=git(t.clone,'rev-parse','HEAD')
+    incoming=('renamed.py' if case=='rename_to' else 'owned.py') if overlap else 'unrelated.py'
+    (t.origin/incoming).write_text('upstream\n');git(t.origin,'add',incoming);git(t.origin,'commit','-qm','incoming')
+    target=git(t.origin,'rev-parse','HEAD')
+    if case=='cancelled':
+        (t.clone/'owned.py').write_text('# owner staged repair\n');git(t.clone,'add','owned.py');(t.clone/'owned.py').write_text('base\n')
+        assert git(t.clone,'diff','HEAD','--name-only')==''
+    elif case=='deletion':
+        git(t.clone,'rm','owned.py');(t.clone/'owned.py').write_text('base\n')
+    else:
+        git(t.clone,'mv','owned.py','renamed.py');(t.clone/'renamed.py').write_text('# unstaged after rename\n')
+    paths=('owned.py','renamed.py')
+    def state():
+        return {p:((t.clone/p).read_bytes() if (t.clone/p).exists() else None) for p in paths}
+    before=state(); index=(t.clone/'.git/index').read_bytes()
+    entries=git(t.clone,'ls-files','--stage','--',*paths)
+    stashes=git(t.clone,'stash','list')
+    monkeypatch.setattr(update_cmd,'_UPDATE_CRITICAL_MODULES',())
+    monkeypatch.setattr(cli,'_sync_with_upstream_if_needed',lambda *a,**k:False)
+    t.args.channel='main';t.args.branch='main'
+    code=0
+    try: cli.cmd_update(t.args)
+    except SystemExit as e: code=e.code
+    assert state()==before
+    assert git(t.clone,'ls-files','--stage','--',*paths)==entries, 'staged owner state lost'
+    assert git(t.clone,'stash','list')==stashes
+    if overlap:
+        assert code!=0
+        assert git(t.clone,'rev-parse','HEAD')==head
+        assert (t.clone/'.git/index').read_bytes()==index
+    else:
+        assert code==0
+        assert git(t.clone,'rev-parse','HEAD')==target
