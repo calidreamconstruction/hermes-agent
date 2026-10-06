@@ -63,3 +63,19 @@ def test_oneshot_delegation_budget_charges_total_children_then_refuses(oneshot, 
     # Interactive sessions are never charged, whatever the count.
     monkeypatch.delenv("HERMES_SINGLE_QUERY_SESSION")
     assert delegate_tool._oneshot_spawn_budget(parent, 50) is None
+
+
+def test_local_lean_route_prunes_local_models_but_never_cloud_named_ones(monkeypatch):
+    """Local loopback models get the lean toolset; ``:cloud`` and ``-cloud`` models served through the same
+    :11434 hub are cloud and keep every tool (2026-10-06, reviewer found ``-cloud`` misclassified)."""
+    monkeypatch.setattr(oneshot_footprint, "_local_lean_cfg", lambda: {})
+    hub = "http://127.0.0.1:11434/v1"
+    assert oneshot_footprint.is_local_lean_route("custom", "qwen3.6:35b", "http://127.0.0.1:11439/v1")
+    assert not oneshot_footprint.is_local_lean_route("custom", "glm-5.3:cloud", hub)
+    assert not oneshot_footprint.is_local_lean_route("custom", "gpt-oss:120b-cloud", hub)
+    assert not oneshot_footprint.is_local_lean_route("openrouter", "qwen3.6:35b", "https://openrouter.ai/api/v1")
+    tools = _tools("terminal", "browser_navigate", "kanban_list")
+    kept = {t["function"]["name"] for t in oneshot_footprint.prune_local_lean_tools(tools, "custom", "qwen3.6:35b", hub)}
+    assert "terminal" in kept and "browser_navigate" not in kept and "kanban_list" not in kept
+    cloud = oneshot_footprint.prune_local_lean_tools(tools, "custom", "gpt-oss:120b-cloud", hub)
+    assert len(cloud) == 3

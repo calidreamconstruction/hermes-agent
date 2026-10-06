@@ -1133,6 +1133,8 @@ def _load_tools(agent, enabled_toolsets, disabled_toolsets):
     # A finite -q run has no later session to learn for: no skill authoring tool (agent/oneshot_footprint.py).
     from agent.oneshot_footprint import prune_oneshot_tools
     agent.tools = prune_oneshot_tools(agent.tools or [])
+    from agent.oneshot_footprint import prune_local_lean_tools
+    agent.tools = prune_local_lean_tools(agent.tools or [], getattr(agent, 'provider', None), getattr(agent, 'model', None), getattr(agent, 'base_url', ''))
     from tools.connectors.turn import side_agent_tool_drops
     drops = side_agent_tool_drops(agent)
     if drops:

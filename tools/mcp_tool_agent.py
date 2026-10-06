@@ -55,9 +55,17 @@ def _tool_defs_content_changed(agent, new_defs: list) -> bool:
 def _drop_side_agent_tools(agent, new_defs: list, new_names: set) -> tuple:
     from tools.connectors.turn import side_agent_tool_drops
     drops = side_agent_tool_drops(agent)
-    if not drops:
-        return new_defs, new_names
-    return [entry for entry in new_defs if _def_name(entry) not in drops], new_names - drops
+    if drops:
+        new_defs = [entry for entry in new_defs if _def_name(entry) not in drops]
+        new_names = new_names - drops
+    # Local-model lean surface (agent/oneshot_footprint.py): every refresh/pin path re-applies it.
+    from agent.oneshot_footprint import prune_local_lean_tools
+    lean = prune_local_lean_tools(new_defs, getattr(agent, "provider", None), getattr(agent, "model", None),
+                                  getattr(agent, "base_url", ""))
+    if len(lean) != len(new_defs):
+        new_defs = lean
+        new_names = {_def_name(entry) for entry in new_defs}
+    return new_defs, new_names
 
 
 def _publish_tool_snapshot(
