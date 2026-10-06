@@ -672,6 +672,14 @@ class _Runtime:
 
     def _flush_and_export(self, failure_message: str) -> None:
         """Flush the Relay subscriber, then export; a failed flush skips the export."""
+        # A delegate_task child must not block on the Relay barrier: it also waits for managed work started
+        # before it, which includes the parent's still-open delegate_task tool scope - and that scope cannot end
+        # until this child returns. Measured 2026-10-06: child finished in 3-23s, then sat in this flush until the
+        # parent's 480s stale-heartbeat verdict abandoned it (and children ran serially). The parent's own next
+        # flush (task finish or shutdown) exports the child's queued events.
+        from agent.delegation_context import is_delegated_child_context
+        if is_delegated_child_context():
+            return
         try:
             self.relay.subscribers.flush()
         except Exception:
