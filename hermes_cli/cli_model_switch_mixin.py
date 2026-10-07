@@ -472,6 +472,9 @@ class CLIModelSwitchMixin:
             try:
                 from hermes_cli.runtime_provider import resolve_runtime_provider
                 resolved = resolve_runtime_provider(requested=stored_provider, target_model=self.model or None)
+                # Keep the durable route name in requested_provider; the transport needs
+                # the resolver's effective provider (e.g. custom for a named Ollama route).
+                self.provider = resolved.get("provider") or self.provider
                 if resolved.get("api_key"):
                     self.api_key = resolved["api_key"]
                     self._credential_pool = resolved.get("credential_pool")
@@ -495,6 +498,9 @@ class CLIModelSwitchMixin:
             try:
                 from hermes_cli.runtime_provider import resolve_runtime_provider
                 resolved = resolve_runtime_provider(requested=stored_provider, target_model=self.model or None)
+                # Keep the durable route name in requested_provider; the transport needs
+                # the resolver's effective provider (e.g. custom for a named Ollama route).
+                self.provider = resolved.get("provider") or self.provider
                 if resolved.get("api_key"):
                     self.api_key = resolved["api_key"]
                     self._credential_pool = resolved.get("credential_pool")
@@ -515,6 +521,10 @@ class CLIModelSwitchMixin:
                 self.agent.switch_model(
                     new_model=self.model, new_provider=self.provider, api_key=self.api_key or "",
                     base_url=self.base_url or "", api_mode=self.api_mode or "")
+                self.agent.requested_provider = self.requested_provider
+                primary_runtime = getattr(self.agent, "_primary_runtime", None)
+                if isinstance(primary_runtime, dict):
+                    primary_runtime["requested_provider"] = self.requested_provider
             except Exception:
                 logger.debug("In-place agent model swap on resume failed", exc_info=True)
         msg = t("cli.model.restored_from_session", model=stored_model)

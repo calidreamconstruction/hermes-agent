@@ -27,13 +27,15 @@ def _exercise_native_cli(selection):
     home = Path(os.environ["HERMES_HOME"])
     home.mkdir(parents=True, exist_ok=True)
     default_url, selected_url = "http://127.0.0.1:11439/v1", "http://127.0.0.1:11434/v1"
-    model = "qwen3-coder:30b"
+    model = "qwen3.6:35b"
     cfg = {
-        "model": {"default": "qwen3.6:35b", "provider": "route-default", "base_url": default_url},
+        "model": {"default": "qwen3-coder:30b", "provider": "route-default", "base_url": default_url,
+                  "ollama_num_ctx": 262144},
         "providers": {
             name: {"api": url, "api_key": "test-only", "default_model": model,
                    "models": [{"id": model}]} for name, url in
             (("route-default", default_url), ("route-selected", selected_url))},
+        "agent": {"reasoning_effort": "high"},
         "mcp_servers": {}, "fallback_providers": [], "fallback_model": None,
         "auxiliary": {"title_generation": {"enabled": False}},
         "display": {"streaming": False},
@@ -50,6 +52,7 @@ def _exercise_native_cli(selection):
     sys.addaudithook(deny_network)
     import httpx
     routes = []
+    wire_options = []
 
     def send(client, request, *args, **kwargs):
         if request.method == "GET" and request.url.path.endswith("/models"):
@@ -58,6 +61,7 @@ def _exercise_native_cli(selection):
         assert request.method == "POST" and request.url.path.endswith("/chat/completions")
         payload = json.loads(request.content)
         routes.append((str(request.url), payload["model"]))
+        wire_options.append({k: payload[k] for k in ("options", "reasoning_effort", "reasoning") if k in payload})
         results = [m for m in payload["messages"] if m.get("role") == "tool"]
         if results:
             assert nonce in str(results[-1]["content"])
@@ -91,12 +95,22 @@ def _exercise_native_cli(selection):
         result = first.agent.run_conversation("Read the fixture and repeat its nonce.")
         assert result["final_response"] == nonce
         assert routes == [(selected_url + "/chat/completions", model)] * 2
+        assert wire_options[0]["options"]["num_ctx"] == 262144
+        assert wire_options[0]["reasoning_effort"] == "high"
         second = HermesCLI(compact=True, ignore_rules=True, toolsets=["file"], resume=first.session_id)
         assert second._init_agent()
         result = second.agent.run_conversation("Repeat the nonce.", conversation_history=second.conversation_history)
         assert result["final_response"] == nonce
         assert routes[-1] == routes[0], f"resume changed the outgoing route: {routes}"
         assert second.requested_provider == "route-selected"
+        assert second.agent.provider == first.agent.provider == "custom"
+        assert second.agent.requested_provider == "route-selected"
+        assert wire_options[-1] == wire_options[0], f"resume changed provider request shaping: {wire_options}"
+        # Mid-chat resume must keep the named route through later primary-runtime restoration.
+        second._restore_session_model(second._session_db.get_session(first.session_id))
+        assert second.agent.provider == "custom"
+        assert second.agent.requested_provider == "route-selected"
+        assert second.agent._primary_runtime["requested_provider"] == "route-selected"
         first.agent.close()
         second.agent.close()
         first._session_db.close()
