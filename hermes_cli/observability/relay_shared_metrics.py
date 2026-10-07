@@ -657,13 +657,7 @@ class _Runtime:
         session = self._task_session(event, **lookup)
         task = session.tasks.get(_text(event, "task_id")) if session is not None else None
         if task is None and start:
-            # Lifecycle hooks can race relay shutdown; metrics are optional.
-            try:
-                task = self.start_task(event)
-            except RuntimeError as exc:
-                if str(exc) != "Hermes Relay session is closing":
-                    raise
-                task = None
+            task = self.start_task(event)
             session = self._task_session(event) if task is not None else None
         return session, task
 
