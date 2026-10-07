@@ -331,12 +331,18 @@ class AIAgent(
             return None
 
     def _session_row_model_config(self) -> Any:
-        """``model_config`` for the session row: the init config plus the live YOLO bypass.
+        """Persist the live route and YOLO state when a session row is first created.
 
-        The row is created lazily on the first turn, so this is the only chance to record a pre-first-turn
-        /yolo toggle for ``hermes --resume``.
+        The row is deferred until the first turn: earlier /model and /yolo commands cannot patch it.
+        Compression children need the current route too, not a constructor-time snapshot.
         """
-        model_config = self._session_init_model_config
+        route = {
+            "provider": getattr(self, "requested_provider", None) or getattr(self, "provider", None),
+            "base_url": getattr(self, "base_url", None) or None,
+            "api_mode": getattr(self, "api_mode", None) or None,
+        }
+        # CLI resume reads gateway_runtime; TUI resume reads the top-level route. Never persist credentials.
+        model_config = {**(self._session_init_model_config or {}), "gateway_runtime": route, **route}
         try:
             from tools.approval import is_session_yolo_enabled
             if is_session_yolo_enabled(self.session_id):

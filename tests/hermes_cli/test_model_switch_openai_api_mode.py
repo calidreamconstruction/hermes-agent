@@ -15,7 +15,10 @@ model's reasoning effort actually apply, turning a silently-dropped
 reasoning_effort into a live one that OpenAI 400s on the chat_completions path.
 """
 
+from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
 
 from hermes_cli.model_switch import switch_model
 from hermes_cli.providers import host_mandated_api_mode
@@ -100,22 +103,34 @@ def test_generic_endpoint_keeps_explicit_api_mode():
     assert host_mandated_api_mode("https://api.openai.com/v1") == "codex_responses"
     assert host_mandated_api_mode("https://api.anthropic.com") == "anthropic_messages"
 
-def test_stale_chat_overridden_on_meta_direct():
+@pytest.mark.parametrize("catalog_available", [True, False])
+def test_stale_chat_overridden_on_meta_direct(catalog_available):
     """Stale chat_completions on api.meta.ai → codex_responses (like openai direct).
 
     Switching from openrouter/chat_completions to muse-spark on meta's
     endpoint must flip to Responses API for caching (0% vs 93-99%).
     """
-    result = _run_openai_switch(
-        raw_input="muse-spark-1.2",
-        current_provider="openrouter",
-        current_model="anthropic/claude-opus-4.8",
-        explicit_provider="meta",
-        runtime_api_mode="chat_completions",  # stale
-        runtime_base_url="https://api.meta.ai/v1",
+    # models.dev owns the id "meta" when its catalog is available. Without that entry,
+    # the bundled profile resolves the same alias to "meta-ai". Exercise both rungs explicitly
+    # instead of letting the developer's catalog cache decide this protocol regression test.
+    catalog_entry = SimpleNamespace(
+        name="Meta", env=("MODEL_API_KEY",), api="https://api.meta.ai/v1", doc="",
     )
+    with patch(
+        "hermes_cli.providers._models_dev_info",
+        side_effect=lambda name, *a, **k: catalog_entry if catalog_available and name == "meta" else None,
+    ):
+        result = _run_openai_switch(
+            raw_input="muse-spark-1.2",
+            current_provider="openrouter",
+            current_model="anthropic/claude-opus-4.8",
+            explicit_provider="meta",
+            runtime_api_mode="chat_completions",  # stale
+            runtime_base_url="https://api.meta.ai/v1",
+        )
     assert result.success, f"switch_model failed: {result.error_message}"
-    assert result.target_provider == "meta"
+    assert result.target_provider == ("meta" if catalog_available else "meta-ai")
+    assert result.base_url == "https://api.meta.ai/v1"
     assert result.new_model == "muse-spark-1.2"
     assert result.api_mode == "codex_responses"
 
