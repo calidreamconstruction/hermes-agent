@@ -104,10 +104,24 @@ class ReasoningParamsMixin:
         if base_url_host_matches(url, "ollama.com"):
             # Ollama Cloud: /api/show capabilities are authoritative.
             return self._ollama_supports_thinking_cached()
-        if url and any(base_url_host_matches(url, h) for h in ("127.0.0.1", "localhost", "[::1]")):
-            # Local Ollama endpoints: /api/show is authoritative here too — honors
-            # reasoning_effort "none" = think:false (verified 2026-09-22: gemma4 3x faster).
-            return self._ollama_supports_thinking_cached()
+        if url:
+            from urllib.parse import urlsplit
+
+            if urlsplit(url).hostname in ("127.0.0.1", "localhost", "::1"):
+                # Loopback and port numbers do not identify a backend. Reuse the
+                # TTL-cached detection already used by context discovery, including
+                # Ollama on nonstandard ports; never POST /api/show to another server.
+                try:
+                    from agent.model_metadata import detect_local_server_type
+
+                    key = getattr(self, "api_key", "")
+                    backend = detect_local_server_type(
+                        self.base_url, api_key=key if isinstance(key, str) else ""
+                    )
+                except Exception:
+                    backend = None
+                if backend == "ollama":
+                    return self._ollama_supports_thinking_cached()
         if not self._is_openrouter_url() or base_url_host_matches(url, "api.mistral.ai"):
             return False
         # Live-catalog metadata first (OpenRouter /v1/models supported_parameters) — the static prefix
