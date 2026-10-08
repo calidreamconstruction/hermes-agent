@@ -1921,6 +1921,23 @@ def _summarize_tool_result_unguarded(tool_name: str, tool_args: str, tool_conten
     """Build the summary line (unguarded; see ``_summarize_tool_result``)."""
     args = _json_dict(tool_args)
     content = tool_content or ""
+    # Outcome preservation follows NousResearch/hermes-agent context_compressor.py
+    # refusal-summary contract: an approval refusal is not an executed action.
+    # Inspect only the result envelope, never text embedded in successful output.
+    outcome = _json_dict(content)
+    status = outcome.get("status")
+    refusal = outcome.get("error")
+    refusal = refusal if isinstance(refusal, str) else ""
+    raw_block = isinstance(content, str) and content.lstrip().startswith("BLOCKED")
+    if status in ("blocked", "pending_approval") or raw_block or refusal.lstrip().startswith("BLOCKED"):
+        pending = status == "pending_approval"
+        label = "awaiting approval, not run" if pending else "BLOCKED, not run"
+        denial = refusal + (content if raw_block else "")
+        if not pending and "NOT consented" in denial:
+            label += "; user did NOT consent; do not retry or pursue an equivalent action"
+        target = _str_arg(args, "command") or _str_arg(args, "path")
+        # Put the outcome first so long tool identities cannot truncate it away.
+        return (label + " [" + str(tool_name)[:60] + "] " + target[:60])[:_PRUNE_MIN_CHARS - 1]
     content_len = len(content)
     line_count = content.count("\n") + 1 if content.strip() else 0
     summarizer = _TOOL_RESULT_SUMMARIZERS.get(tool_name)
@@ -3375,8 +3392,15 @@ class ContextCompressor(SummaryDispatchMixin, MicroCompactionMixin, ContextEngin
         recent-tail protection applies to passes (2) and (3); pass (1) is tail-agnostic by design because
         dedup is lossless.
         """
-        if self.proactive_prune_tokens <= 0 or (
-            current_tokens is not None and current_tokens < self.proactive_prune_tokens
+        # An absolute 48K trigger never fires before full compaction on a 32K
+        # or 64K local model. Bound it to the model's actual compression budget;
+        # threshold_tokens already follows model switches, output reservation,
+        # and the summarizer ceiling. Disabled remains disabled.
+        if self.proactive_prune_tokens <= 0:
+            return messages, 0
+        prune_trigger = min(self.proactive_prune_tokens, max(1, int(self.threshold_tokens * 0.6)))
+        if (
+            current_tokens is not None and current_tokens < prune_trigger
         ):
             return messages, 0
         if len(messages) <= self.protect_last_n + self._protect_head_size(messages) + 1:
@@ -3406,7 +3430,7 @@ class ContextCompressor(SummaryDispatchMixin, MicroCompactionMixin, ContextEngin
             self._warn_reclamation_no_op("prune:reclaim_below_minimum", current_tokens, before=before)
             return messages, 0
         # Require a full trigger-sized regrowth before the next cache-breaking rewrite.
-        runway = max(reclaimed, self.proactive_prune_tokens, self.proactive_prune_min_reclaim_tokens)
+        runway = max(reclaimed, prune_trigger, self.proactive_prune_min_reclaim_tokens)
         next_rearm_tokens = after + runway
         if session_db and session_id:
             try:

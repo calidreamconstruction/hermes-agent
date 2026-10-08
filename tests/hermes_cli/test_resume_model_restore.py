@@ -101,7 +101,7 @@ def test_restore_llamacpp_session_follows_live_managed_endpoint(monkeypatch):
             "base_url": "http://127.0.0.1:51489/v1",
             "api_mode": "chat_completions",
         }))
-    assert stub.provider == "llamacpp"
+    assert stub.provider == live["provider"]
     assert stub.requested_provider == "llamacpp"
     assert stub.base_url == live["base_url"]
     assert stub._explicit_base_url in (None, "")

@@ -62,8 +62,16 @@ def _proc_fields(path: str, wanted: Dict[str, str]) -> Dict[str, int]:
 
 
 def sample_memory() -> Dict[str, Any]:
-    """Cheap /proc snapshot (KiB): own RSS + MemTotal/MemAvailable + swap used.  Linux-only
-    (``{}`` elsewhere), never raises; the 30s heartbeat embeds it so OOM cycles are classifiable."""
+    """Cheap memory snapshot (KiB): own RSS + total/available + swap used.
+
+    Linux reads /proc directly (no dependency). On macOS/Windows, where /proc
+    is absent, fall back to ``psutil`` so the same keys are populated and the
+    memory-derived kanban concurrency cap (``derive_default_max_in_progress``)
+    can actually bound workers instead of returning ``None`` (unbounded) —
+    that unbounded case is what let ~20 kanban workers each spawn their own
+    MCP children and drive the host into V8 heap OOM. Never raises; ``{}``
+    only when neither source is available.
+    """
     sample = _proc_fields("/proc/self/status", {"VmRSS": "rss_kib"})
     mem = _proc_fields("/proc/meminfo", {"MemTotal": "mem_total_kib", "MemAvailable": "mem_available_kib",
                                          "SwapTotal": "SwapTotal", "SwapFree": "SwapFree"})
@@ -71,6 +79,30 @@ def sample_memory() -> Dict[str, Any]:
     sample.update(mem)
     if swap_total is not None and swap_free is not None:
         sample["swap_used_kib"] = swap_total - swap_free
+    if not sample:
+        sample = _sample_memory_portable()
+    return sample
+
+
+def _sample_memory_portable() -> Dict[str, Any]:
+    """psutil-based snapshot (KiB) for platforms without /proc. Never raises."""
+    try:
+        import psutil
+    except Exception:
+        return {}
+    sample: Dict[str, Any] = {}
+    try:
+        vm = psutil.virtual_memory()
+        sample["mem_total_kib"] = int(vm.total // 1024)
+        sample["mem_available_kib"] = int(getattr(vm, "available", vm.total) // 1024)
+        sample["rss_kib"] = int(psutil.Process().memory_info().rss // 1024)
+    except Exception:
+        return sample
+    try:
+        sm = psutil.swap_memory()
+        sample["swap_used_kib"] = int(sm.used // 1024)
+    except Exception:
+        pass
     return sample
 
 

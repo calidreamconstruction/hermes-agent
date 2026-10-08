@@ -87,6 +87,23 @@ def test_prunes_below_compression_threshold():
         assert m["content"] != _PRUNED_TOOL_PLACEHOLDER       # informative, not a blank placeholder
 
 
+def test_prune_adapts_to_small_model_and_switch_without_changing_config():
+    c = _compressor(proactive_prune_tokens=48_000, config_context_length=32_768)
+    msgs = _build(8, big_indices={0, 1, 2})
+    trigger = int(c.threshold_tokens * 0.6)
+    assert trigger < 48_000
+    untouched, count = c.prune_tool_results_only(msgs, current_tokens=trigger - 1)
+    assert untouched is msgs and count == 0
+    result, count = c.prune_tool_results_only(msgs, current_tokens=trigger)
+    assert result is not msgs and count >= 3
+    # Native update resets model budgets and prune hysteresis for the new model.
+    with patch('agent.context_compressor.get_model_context_length', return_value=LARGE_WINDOW):
+        c.update_model('large-test', context_length=LARGE_WINDOW)
+        untouched, count = c.prune_tool_results_only(msgs, current_tokens=30_000)
+    assert untouched is msgs and count == 0
+    assert c.proactive_prune_tokens == 48_000
+
+
 def test_idempotent():
     c = _compressor(proactive_prune_tokens=48_000, proactive_prune_min_result_chars=8_000)
     msgs = _build(8, big_indices={0, 1, 2})

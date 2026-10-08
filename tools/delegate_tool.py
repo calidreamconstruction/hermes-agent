@@ -74,7 +74,9 @@ _HEARTBEAT_INTERVAL = 30  # seconds between parent activity heartbeats during de
 # last_activity_ts advancing; an in-flight model wait refreshes last_activity_ts, so slow models are not "idle". Idle
 # stays tight so a truly wedged child doesn't mask the gateway timeout; in-tool is much higher so legitimately long
 # tools can finish.
-_HEARTBEAT_STALE_CYCLES_IDLE = 15  # 450s idle between turns → stale
+_HEARTBEAT_STALE_CYCLES_IDLE = 40  # 1200s idle between turns → stale (was 15/450s: too tight for slow local-model
+                                   # final summary turns — 5-for-5 false "abandoned" verdicts on 2026-10-06 while
+                                   # qwen3-coder:30b finished real work; matched to IN_TOOL threshold)
 _HEARTBEAT_STALE_CYCLES_IN_TOOL = 40  # 1200s stuck on same tool → stale
 
 def check_delegate_requirements() -> bool:

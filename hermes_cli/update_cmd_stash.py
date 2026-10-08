@@ -79,6 +79,36 @@ def _print_first_line(text: str) -> None:
         print(f"  {text.strip().splitlines()[0]}")
 
 
+def _refuse_overlapping_local_update(git_cmd: list[str], cwd: Path, target_ref: str) -> None:
+    """Keep local work live when incoming source overlaps it, before any stash.
+
+    A later stash-apply conflict parks customizations and resets the running
+    tree. Refuse that update up front instead; unrelated source can advance.
+    Git's NUL-separated paths preserve spaces and unusual filenames.
+    """
+    from hermes_cli.update_cmd_git import _git_run
+    snapshots = []
+    # HEAD-to-worktree alone hides staged edits canceled in the worktree.
+    # Disable rename folding so both source and destination paths participate.
+    for args in (["diff", "--cached", "--no-renames", "--name-only", "-z", "HEAD", "--"],
+                 ["diff", "--no-renames", "--name-only", "-z", "--"],
+                 ["ls-files", "--others", "--exclude-standard", "-z"],
+                 ["diff", "--no-renames", "--name-only", "-z", "HEAD", target_ref, "--"]):
+        result = _git_run(git_cmd, args, cwd)
+        if result.returncode != 0:
+            print("✗ Cannot verify local source against update target; checkout unchanged.")
+            _print_nonempty(result.stderr or result.stdout)
+            raise SystemExit(1)
+        snapshots.append(set(filter(None, result.stdout.split("\0"))))
+    overlap = sorted((snapshots[0] | snapshots[1] | snapshots[2]) & snapshots[3])
+    if overlap:
+        print(f"✗ Update target {target_ref} overlaps local changes; checkout and index unchanged.")
+        for path in overlap:
+            print(f"  • {path}")
+        print("Resolve these source changes against the update target before retrying; no local work was stashed.")
+        raise SystemExit(1)
+
+
 def _stash_local_changes_if_needed(git_cmd: list[str], cwd: Path) -> Optional[str]:
     global _pending_autostash
     from hermes_cli.update_cmd_git import _git_run
@@ -383,7 +413,9 @@ def _apply_stash(git_cmd: list[str], cwd: Path, stash_ref: str) -> list[str] | N
     None (tree reset, stash kept) on conflicts or any failure other than the already-exists class."""
     from hermes_cli.update_cmd_git import _git_run
     print("→ Restoring local changes...")
-    restore = _git_run(git_cmd, ["stash", "apply", stash_ref], cwd)
+    # Reapply the saved index as well as worktree bytes. Without --index,
+    # staged-only repairs (including canceled worktree edits) can disappear.
+    restore = _git_run(git_cmd, ["stash", "apply", "--index", stash_ref], cwd)
     unmerged = _git_run(git_cmd, ["diff", "--name-only", "--diff-filter=U"], cwd)  # conflicts can exist even on rc 0
     conflicted_files = unmerged.stdout.strip()
     if restore.returncode == 0 and not conflicted_files:

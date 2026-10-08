@@ -134,10 +134,31 @@ def nearest_root(
     return None
 
 
+def _is_home_or_above(root: Optional[str]) -> bool:
+    """True when ``root`` is ``$HOME`` or an ancestor of it.
+
+    A git repo rooted at or above ``$HOME`` (a dotfiles repo) must never become
+    an LSP workspace: pyright et al. would then index the entire home tree —
+    every checkout, venv, model dir and node_modules below it — and a single
+    server grew past 3 GB and died with a V8 heap OOM (2026-10-07). The
+    operator-root path already guards this; the file's-own-worktree fallback
+    below did not, so any edit to a file under ``$HOME`` (whose nearest repo is
+    home itself) spawned a home-wide server.
+    """
+    if not root:
+        return False
+    try:
+        home = normalize_path("~")
+    except Exception:
+        return False
+    return root == home or is_inside_workspace(home, root)
+
+
 def resolve_workspace_for_file(file_path: str, *, cwd: Optional[str] = None) -> Tuple[Optional[str], bool]:
     """Return ``(workspace_root, gated_in)`` for a file.  The cwd's worktree wins when the file is
     inside it; otherwise the file's own worktree is the fallback anchor (monorepos / unrelated
-    checkouts).  ``(None, False)`` when neither is in a git worktree."""
+    checkouts).  ``(None, False)`` when neither is in a git worktree — or when the only candidate
+    root is ``$HOME`` or above it (see ``_is_home_or_above``)."""
     try:
         cwd_anchor = cwd or os.getcwd()
     except OSError:
@@ -146,10 +167,10 @@ def resolve_workspace_for_file(file_path: str, *, cwd: Optional[str] = None) -> 
         # there is simply no cwd anchor — fall through to the file's own worktree.
         cwd_anchor = None
     cwd_root = find_git_worktree(cwd_anchor) if cwd_anchor else None
-    if cwd_root is not None and is_inside_workspace(file_path, cwd_root):
+    if cwd_root is not None and is_inside_workspace(file_path, cwd_root) and not _is_home_or_above(cwd_root):
         return cwd_root, True
     file_root = find_git_worktree(file_path)
-    if file_root is not None:
+    if file_root is not None and not _is_home_or_above(file_root):
         return file_root, True
     return None, False
 
