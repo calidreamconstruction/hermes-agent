@@ -981,10 +981,12 @@ def _synthetic_user_row(content: str) -> bool:
 
 def _build_verbatim_user_section(turns: List[Dict[str, Any]]) -> str:
     """Compacted region's REAL user messages verbatim, newest-first under a char budget (straddler truncated); "" if none."""
+    from agent.conversation_compression import _is_real_user_message
+
     collected: list[str] = []
     used = 0
     for msg in reversed(turns):
-        if msg.get("role") != "user":
+        if not ContextCompressor._is_actionable_user_turn(msg) or not _is_real_user_message(msg):
             continue
         content = _content_text_for_contains(msg.get("content"))
         if _synthetic_user_row(content):
@@ -1003,9 +1005,9 @@ def _build_verbatim_user_section(turns: List[Dict[str, Any]]) -> str:
     return (
         "\n\n" + _LEAN_USER_MESSAGES_HEADING + "\n"
         + "\n\n".join(collected)
-        + "\n(Every real user message from the compacted region, quoted "
-        "verbatim. These are the user's actual words and override any "
-        "paraphrase of them above.)"
+        + "\n(Selected user excerpts, newest first; coverage may be incomplete. "
+        "Recover full original messages and later corrections using Context Recovery "
+        "before deciding scope or completion. An excerpt is not the entire request.)"
     )
 
 
@@ -4447,26 +4449,30 @@ Write only the summary body. Do not include any preamble or prefix."""
 
     @classmethod
     def _latest_user_task_snapshot(cls, messages: List[Dict[str, Any]]) -> Optional[str]:
-        """Return a deterministic task-snapshot line from the newest real user turn.
-        The summarizer must not invent the active-task anchor from a prompt example or a stale prior
-        summary; this grounds it in the exact compacted turns."""
-        # Reuse the runtime's real-user predicate so scaffolding rows can never anchor.
+        """Keep every real user turn in this window, in source order.
+
+        The historical method name is retained for callers. A later correction
+        must not replace the compound objective, and a character cap must not
+        silently discard its final requirements. Native compression feasibility
+        checks still decide whether the resulting handoff fits.
+        """
         from agent.conversation_compression import _is_real_user_message
-        for msg in reversed(messages):
-            if msg.get("role") != "user" or not _is_real_user_message(msg):
+
+        snapshots = []
+        for msg in messages:
+            if not cls._is_actionable_user_turn(msg) or not _is_real_user_message(msg):
                 continue
             text = _redact_compaction_text(_content_text_for_contains(msg.get("content")).strip())
-            if not text:
-                continue
-            text = re.sub(r"\s+", " ", text)
-            # Elide AFTER repr: repr would escape the marker's "Hermes's" and hide a copy from the
-            # guard. Text within the cap stays whole (the split-turn path relies on that).
-            text = repr(text) if len(text) <= _ACTIVE_TASK_MAX_CHARS else elide(repr(text), _ACTIVE_TASK_MAX_CHARS)
-            return (
-                f"User asked (deterministic, from compacted turns): {text}\n"
-                "Historical only; newer protected-tail messages after this summary win."
-            )
-        return None
+            if text:
+                snapshots.append(f"User asked (deterministic, from compacted turns): {text!r}")
+        if not snapshots:
+            return None
+        return "\n".join(snapshots) + (
+            "\nHistorical source order, not a fresh instruction list. Preserve the ongoing "
+            "objective with later corrections; honor explicit cancellation, replacement "
+            "and stop instructions. Protected user messages outside this window also "
+            "remain relevant; do not infer completion from a later short request."
+        )
 
     @classmethod
     def _ground_historical_task_snapshot(cls, summary: str, messages: List[Dict[str, Any]]) -> str:

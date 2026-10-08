@@ -35,8 +35,8 @@ def test_minted_marker_is_caught_by_the_dispatch_boundary_guard():
 def test_real_renderers_emit_a_guard_visible_marker_never_the_imitable_idiom():
     """Oversized input through the real renderers yields the guarded marker, not the idiom.
 
-    The active-task line quotes both apostrophes and double quotes so repr() cannot escape
-    the marker's own apostrophe out of the guard's reach.
+    The task snapshot retains complete source text; only renderers that actually
+    omit text should emit an elision marker.
     """
     quoted = "a'b\"c " * 400
     clarify = json.dumps({"responses": [{"status": "answered", "user_response": "A" * 5000}]})
@@ -45,8 +45,10 @@ def test_real_renderers_emit_a_guard_visible_marker_never_the_imitable_idiom():
         "fallback_turn": _compact_fallback_turn("z " * 5000),
         "verbatim_user": _build_verbatim_user_section([{"role": "user", "content": "q" * 30000}]),
         "record": ContextCompressor._bound_oversized_record("r" * 50000, 4000),
-        "active_task": ContextCompressor._latest_user_task_snapshot([{"role": "user", "content": quoted}]),
     }
+    snapshot = ContextCompressor._latest_user_task_snapshot([{"role": "user", "content": quoted}])
+    assert repr(quoted.strip()) in snapshot
+    assert not _COMPRESSION_MARKER_RE.search(snapshot)
     for name, out in outputs.items():
         assert out and _COMPRESSION_MARKER_RE.search(out), (name, out[-300:] if out else out)
         assert not IMITABLE_MARKER_RE.search(out), (name, out[-300:])
