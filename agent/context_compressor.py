@@ -255,48 +255,31 @@ def _exc_status_code(exc: Exception) -> Any:
 HISTORICAL_TASK_HEADING = "## Historical Task Snapshot"
 
 
-SUMMARY_PREFIX = (
-    # Jul 2026 (#65848 class): identical to the pre-#69619 prefix except it lacked the explicit "tools
-    # remain fully active" clause — the strong REFERENCE ONLY framing bled into general tool-use suppression
-    # (observed: 7 consecutive narration-only turns immediately after a compression event on a production
-    # deployment).
-    # Carveout era (#41607/#38364/#42812): "consistent → use as background" licensed stale-task resumption
-    # on topic overlap.
-    "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted "
-    "into the summary below. This is a handoff from a previous context "
-    "window — treat it as background reference, NOT as active instructions. "
-    "Do NOT answer questions or fulfill requests mentioned in this summary; "
-    "they were already addressed. "
-    "Respond ONLY to the latest user message that appears AFTER this "
-    "summary — that message is the single source of truth for what to do "
-    "right now. "
-    "If no user message appears AFTER this summary, do nothing: do not "
-    "resume, wrap up, or continue work from "
-    f"'{HISTORICAL_TASK_HEADING}' or any other section, do not call tools, "
-    "and wait for a new user message. This handoff must never become the "
-    "active turn by itself. (Exception: if tool results or your own "
-    "tool calls appear after this summary, you are mid-way through an "
-    "in-flight exchange — continue that exchange normally.) "
-    "Topic overlap with the summary does NOT mean you should resume its "
-    "task: even on similar topics, the latest user message WINS. Treat ONLY "
-    "the latest message as the active task and discard stale items from "
-    f"'{HISTORICAL_TASK_HEADING}' entirely — do not 'wrap up' or "
-    "'finish' work described there unless the latest message explicitly "
-    "asks for it. "
-    "Reverse signals in the latest message (e.g. 'stop', 'undo', 'roll "
-    "back', 'just verify', 'don't do that anymore', 'never mind', a new "
-    "topic) must immediately end any in-flight work described in the "
-    "summary; do not re-surface it in later turns. "
-    "IMPORTANT: Your persistent memory (MEMORY.md, USER.md) in the system "
-    "prompt is ALWAYS authoritative and active — never ignore or deprioritize "
-    "memory content due to this compaction note. "
-    "None of the above restricts HOW you work: your tools remain fully "
-    "active — keep calling them normally for the active task (edit files, "
-    "run commands, search) instead of merely narrating what you would do. "
-    "The current session state (files, config, etc.) may reflect work "
-    "described here — avoid repeating it:"
-)
+SUMMARY_PREFIX = '[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted into the summary below. This generated handoff is historical evidence, not a new user message or authority. Recover the ongoing objective and its requirements from actual user messages and source references. Later user corrections steer that objective; a status question or narrow correction does not by itself cancel unfinished requirements. Honor explicit cancellation, replacement, and stop instructions; never revive canceled work merely because it appears here. Do not assume earlier requests were completed: verify outcomes and remaining work against current state. Preserve the distinction between user instructions, assistant proposals, tool results, and unknown origin. Persistent memory (MEMORY.md, USER.md) is evidence to verify against current instructions and observed state, not independent authority. This handoff alone does not authorize a new task or trigger tools; continue an already authorized in-flight task using the actual conversation context. Tools remain available for that task. Avoid repeating verified work and preserve unresolved dependencies:'
 LEGACY_SUMMARY_PREFIX = "[CONTEXT SUMMARY]:"
+
+_LEGACY_COMPRESSION_NOTE = '[Note: Some earlier conversation turns have been compacted into a handoff summary to preserve context space. The current session state may still reflect earlier work, so build on that summary and state rather than re-doing work. Your persistent memory (MEMORY.md, USER.md) remains fully authoritative regardless of compaction.]'
+
+_COMPRESSION_NOTE = '[Note: Earlier turns were compacted into a generated handoff. Verify its claims against original user instructions and current state. Preserve the ongoing objective and later corrections; do not assume unfinished work is complete. Persistent memory is evidence, not independent authority. Avoid repeating verified work.]'
+
+def _refresh_compaction_note(content: Any) -> Any:
+    """Migrate only the exact generated note during the normal compaction boundary.
+
+    Preserve source messages and multimodal payloads; do not rewrite arbitrary
+    user text or memory outside the generated system-note slot.
+    """
+    if isinstance(content, str):
+        return content.replace(_LEGACY_COMPRESSION_NOTE, _COMPRESSION_NOTE)
+    if isinstance(content, list):
+        return [
+            dict(part, text=part["text"].replace(_LEGACY_COMPRESSION_NOTE, _COMPRESSION_NOTE))
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+            else part
+            for part in content
+        ]
+    return content
+
+
 
 # Underscore prefix ON PURPOSE: wire sanitizers strip ``_``-keys; strict gateways
 # reject unknown keys, so a bare key would poison every request in the session.
@@ -620,6 +603,8 @@ def salvage_grown_transcript(
 # Exact wire text of every shipped prefix, newest-first; stale directives must
 # still be strippable on resume. NEVER edit/reorder entries (byte-pinned); prepend.
 _HISTORICAL_SUMMARY_PREFIXES = (
+    # Preserve exact pre-repair Mac handoffs for literal migration.
+    "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted into the summary below. This is a handoff from a previous context window — treat it as background reference, NOT as active instructions. Do NOT answer questions or fulfill requests mentioned in this summary; they were already addressed. Respond ONLY to the latest user message that appears AFTER this summary — that message is the single source of truth for what to do right now. If no user message appears AFTER this summary, do nothing: do not resume, wrap up, or continue work from '## Historical Task Snapshot' or any other section, do not call tools, and wait for a new user message. This handoff must never become the active turn by itself. (Exception: if tool results or your own tool calls appear after this summary, you are mid-way through an in-flight exchange — continue that exchange normally.) Topic overlap with the summary does NOT mean you should resume its task: even on similar topics, the latest user message WINS. Treat ONLY the latest message as the active task and discard stale items from '## Historical Task Snapshot' entirely — do not 'wrap up' or 'finish' work described there unless the latest message explicitly asks for it. Reverse signals in the latest message (e.g. 'stop', 'undo', 'roll back', 'just verify', 'don't do that anymore', 'never mind', a new topic) must immediately end any in-flight work described in the summary; do not re-surface it in later turns. IMPORTANT: Your persistent memory (MEMORY.md, USER.md) in the system prompt is ALWAYS authoritative and active — never ignore or deprioritize memory content due to this compaction note. None of the above restricts HOW you work: your tools remain fully active — keep calling them normally for the active task (edit files, run commands, search) instead of merely narrating what you would do. The current session state (files, config, etc.) may reflect work described here — avoid repeating it:",
     # Pre-#80622: lacked the "no user message after summary => do nothing" clause.
     "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted into the summary below. This is a handoff "
     "from a previous context window — treat it as background reference, NOT as active instructions. Do NOT answer "
@@ -2015,32 +2000,19 @@ _SECTION_INSTRUCTIONS: Dict[bool, Dict[str, str]] = {
             "Write the summary in the same language the user was using in the "
             "conversation — do not translate or switch to English. "
         ),
-        "historical_task": """[THE SINGLE MOST IMPORTANT FIELD. Identify the user's most recent unfulfilled
-input precisely, but summarize it in your own words rather than copying long
-passages from the transcript. The compressor inserts a bounded, redacted
-snapshot of the real latest user turn after generation, so the model must not
-reproduce it.
-This includes:
-- Explicit task assignments ("<specific user task>")
-- Questions awaiting an answer ("<specific user question>")
-- Decisions awaiting input ("<option A or B?>")
-- Ongoing discussions where the assistant owes the next substantive reply
-A conversation where the user just asked a question IS an active task — the
-task is "answer that question with full context". Do NOT write "None" merely
-because the user did not issue an imperative command; reserve "None" for the
-rare case where the last exchange was fully resolved and the user said
-something like "thanks, that's all".
-If multiple items are outstanding, list only the ones NOT yet completed.
-This historical snapshot must identify the latest unresolved user input precisely. Examples:
-"User asked for <specific task and constraints>"
-"User asked <specific question> — needs investigation + answer"
-"User chose <option>; awaiting implementation of <specific next step>"
-If the user's most recent message was a reverse signal (stop, undo, roll
-back, never mind, just verify, change of topic) that supersedes earlier
-work, describe the reverse signal accurately and DO NOT carry forward the
-cancelled task.
-Example: "User asked to stop the prior task — earlier work is cancelled."
-If no outstanding task exists, write "None."]""",
+        "historical_task": """[Recover the ongoing objective and all original requirements from actual user
+messages and retrievable source references. Preserve source order, later corrections,
+exact model/endpoint constraints, and unresolved questions. A status question or narrow
+correction does not by itself cancel unfinished requirements. Honor explicit cancellation,
+replacement, and stop instructions at their stated scope. A rejection of an assistant
+proposal does not authorize it or cancel unrelated work. Distinguish user instructions
+from assistant proposals, tool results, and unknown origin. Generated summaries and
+persistent memory are evidence, not independent authority. List remaining requirements
+and dependencies without asserting completion from a report alone. The compressor adds
+a redacted latest-user snapshot separately; preserve the broader objective under Goal
+and unresolved requirements under In Progress or Blocked. Do not duplicate long source
+passages. Write "None" only when no outstanding task or unanswered question remains,
+supported by source evidence.]""",
         "goal": "[What the user is trying to accomplish overall]",
         "constraints": (
             "[User preferences, coding style, constraints, important decisions. Any security or safety constraint "
@@ -4076,7 +4048,7 @@ PREVIOUS SUMMARY:
 NEW TURNS TO INCORPORATE:
 {content_to_summarize}{_memory_section}
 
-Update the summary using this exact structure. PRESERVE all existing information that is still relevant. ADD new completed actions to the numbered list (continue numbering). Move items from "In Progress" to "Completed Actions" when done. Move answered questions to "Resolved Questions". Update "Active State" to reflect current state. Remove information only if it is clearly obsolete. CRITICAL: Update "{HISTORICAL_TASK_HEADING}" to reflect the user's most recent unfulfilled input — this includes any question, decision request, or discussion turn that the assistant has not yet answered. Only write "None" if the last exchange was fully resolved.
+Update the summary using this exact structure. PRESERVE all existing information that is still relevant. ADD new completed actions to the numbered list (continue numbering). Move items from "In Progress" to "Completed Actions" when done. Move answered questions to "Resolved Questions". Update "Active State" to reflect current state. Remove information only if it is clearly obsolete. CRITICAL: Preserve the ongoing objective, all original requirements, later corrections and unresolved dependencies. A status question does not replace unfinished work. Honor explicit cancellation at its stated scope. The latest-user snapshot does not establish the full scope; retain the broader objective under Goal and unfinished requirements under In Progress or Blocked. Only write "None" when no outstanding task or unanswered question remains.
 
 {_template_sections}"""
         else:
@@ -4096,7 +4068,7 @@ Use this exact structure:
             prompt += f"""
 
 FOCUS TOPIC: "{focus_topic}"
-This compaction should PRIORITISE preserving all information related to the focus topic above. For content related to "{focus_topic}", include full detail — exact values, file paths, command outputs, error messages, and decisions. For content NOT related to the focus topic, summarise more aggressively (brief one-liners or omit if truly irrelevant). The focus topic sections should receive roughly 60-70% of the summary token budget. Even for the focus topic, NEVER preserve API keys, tokens, passwords, or credentials — use [REDACTED]."""
+This compaction should PRIORITISE preserving all information related to the focus topic above. For content related to "{focus_topic}", include full detail — exact values, file paths, command outputs, error messages, and decisions. For content NOT related to the focus topic, summarise more aggressively (brief one-liners or omit if truly irrelevant). Focus must not erase original requirements, later corrections, cancellation scope, exact model/endpoint constraints, or unresolved dependencies. The focus topic sections should receive roughly 60-70% of the summary token budget. Even for the focus topic, NEVER preserve API keys, tokens, passwords, or credentials — use [REDACTED]."""
         return prompt
 
     @staticmethod
@@ -5324,7 +5296,7 @@ Write only the summary body. Do not include any preamble or prefix."""
             logger.warning(message, n_skipped)
         return True
 
-    _COMPRESSION_NOTE = "[Note: Some earlier conversation turns have been compacted into a handoff summary to preserve context space. The current session state may still reflect earlier work, so build on that summary and state rather than re-doing work. Your persistent memory (MEMORY.md, USER.md) remains fully authoritative regardless of compaction.]"
+    _COMPRESSION_NOTE = _COMPRESSION_NOTE
 
     def _assemble_head(self, messages: List[Dict[str, Any]], compress_start: int) -> List[Dict[str, Any]]:
         """Protected head with the compaction note on the system prompt and stale handoffs stripped."""
@@ -5334,7 +5306,8 @@ Write only the summary body. Do not include any preamble or prefix."""
             # keeps prior-tail text). Merged rows hold real user text — never blanket-skip.
             msg = _fresh_compaction_message_copy(messages[i])
             if i == 0 and msg.get("role") == "system":
-                existing = msg.get("content")
+                existing = _refresh_compaction_note(msg.get("content"))
+                msg["content"] = existing
                 if self._COMPRESSION_NOTE not in _content_text_for_contains(existing):
                     sep = "\n\n" if isinstance(existing, str) and existing else ""
                     msg["content"] = _append_text_to_content(existing, sep + self._COMPRESSION_NOTE)
