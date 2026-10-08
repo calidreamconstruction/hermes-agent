@@ -97,7 +97,21 @@ def prune_local_lean_tools(tools: Iterable[Dict[str, Any]], provider: Any, model
     cfg = _local_lean_cfg()
     drop = frozenset(cfg.get("drop_tools") or LOCAL_LEAN_DROP_TOOLS)
     pref = tuple(cfg.get("drop_prefixes") or LOCAL_LEAN_DROP_PREFIXES)
+    worker = _is_kanban_worker()
     def keep(t):
         n = (t.get("function") or {}).get("name") or ""
+        # A dispatcher-owned kanban worker MUST keep its board tools: dropping them made every local-model
+        # worker exit without kanban_complete (protocol violation) since 2026-10-06 (tool listed in the
+        # prompt, rejected by the executor as "does not exist").
+        if worker and n.startswith("kanban_"):
+            return True
         return n not in drop and not n.startswith(pref)
     return [t for t in tools if keep(t)]
+
+
+def _is_kanban_worker() -> bool:
+    try:
+        from agent.delegation_context import owned_kanban_task
+        return bool(owned_kanban_task())
+    except Exception:
+        return False

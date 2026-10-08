@@ -79,3 +79,18 @@ def test_local_lean_route_prunes_local_models_but_never_cloud_named_ones(monkeyp
     assert "terminal" in kept and "browser_navigate" not in kept and "kanban_list" not in kept
     cloud = oneshot_footprint.prune_local_lean_tools(tools, "custom", "gpt-oss:120b-cloud", hub)
     assert len(cloud) == 3
+
+
+def test_local_lean_keeps_kanban_tools_for_a_dispatcher_owned_worker(monkeypatch):
+    """2026-10-08: the lean prune dropped kanban_* for local models, so a kanban worker was told about
+    kanban_complete in its prompt but the executor rejected it as nonexistent; every local worker exited
+    without completing. A dispatcher-owned worker keeps its board tools; plain local chats still drop them."""
+    monkeypatch.setattr(oneshot_footprint, "_local_lean_cfg", lambda: {})
+    hub = "http://127.0.0.1:11439/v1"
+    tools = _tools("terminal", "browser_navigate", "kanban_complete", "kanban_block")
+    monkeypatch.setattr(oneshot_footprint, "_is_kanban_worker", lambda: True)
+    kept = {t["function"]["name"] for t in oneshot_footprint.prune_local_lean_tools(tools, "custom", "qwen3.6:35b", hub)}
+    assert {"kanban_complete", "kanban_block", "terminal"} <= kept and "browser_navigate" not in kept
+    monkeypatch.setattr(oneshot_footprint, "_is_kanban_worker", lambda: False)
+    kept = {t["function"]["name"] for t in oneshot_footprint.prune_local_lean_tools(tools, "custom", "qwen3.6:35b", hub)}
+    assert "kanban_complete" not in kept
