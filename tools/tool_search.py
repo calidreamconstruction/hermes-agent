@@ -454,7 +454,13 @@ def dispatch_tool_search(args: Dict[str, Any], *, current_tool_defs: List[Dict[s
     raw_limit = args.get("limit")
     limit = (config.search_default_limit if raw_limit is None
              else _clamped_int(raw_limit, config.search_default_limit, 1, config.max_search_limit))
-    catalog = build_catalog(_deferrable_in(current_tool_defs))
+    visible_defs, deferrable_defs = classify_tools(current_tool_defs, load_config_readonly().effective_defer_tools)
+    catalog = build_catalog(deferrable_defs)
+    # Tools already in the model's list are not in the deferred catalog, so a search for them used to
+    # come back empty and models concluded they did not exist (2026-10-08: a kanban worker searched
+    # "kanban get task", saw only kanban_schedule, and tried to write the board DB by hand instead of
+    # calling its visible kanban_show/kanban_complete). Report those matches as already loaded.
+    loaded_catalog = build_catalog(visible_defs)
     remote_entries: List[List[CatalogEntry]] = [[] for _ in queries]
     hosted_failure: Optional[str] = None
     if connections_in_scope(current_tool_defs):
@@ -470,6 +476,12 @@ def dispatch_tool_search(args: Dict[str, Any], *, current_tool_defs: List[Dict[s
             tools_map.setdefault(h.name, _shared_tool_record(h))
         matches = [h.name for h in hits]
         group: Dict[str, Any] = {"query": query, "matches": matches}
+        loaded = [h.name for h in search_catalog(loaded_catalog, query, limit=limit)]
+        if loaded:
+            group["already_loaded"] = loaded
+            group["already_loaded_hint"] = (
+                "These matching tools are already in your tool list: call them directly. "
+                "tool_search only lists tools that are not loaded yet.")
         if not matches and available_sources:
             group["available_sources"] = available_sources
             group["hint"] = (
