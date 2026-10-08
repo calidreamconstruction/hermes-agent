@@ -2185,14 +2185,20 @@ def revalidate_compression_feasibility(agent: Any) -> None:
     # Bind the NEW main runtime first: it is otherwise only published at the next turn start, so a
     # mid-session /model switch probed ``auxiliary.compression.provider: main`` against the PREVIOUS
     # model and kept its window as a durable ceiling (gemma 64K capped deepseek-v4-pro:cloud 1M, 2026-09-23).
-    with contextlib.suppress(Exception):
-        from agent.turn_context import _publish_runtime_main
-        _publish_runtime_main(agent)
-    try:
-        check_compression_model_feasibility(agent)
-    except Exception as exc:
-        logger.debug("Compression feasibility re-check deferred to the next compaction: %s", exc)
-        return
+    # Scoped bind (contextvar only, reset on exit): the old _publish_runtime_main call wrote the
+    # process-global legacy mirrors and never reset them, leaking this agent's runtime into every later
+    # consumer in the process (findings/18 §5, fix 89d82f01c5 lost with its sandbox; restored 2026-10-08).
+    with contextlib.ExitStack() as stack:
+        with contextlib.suppress(Exception):
+            from agent.auxiliary_client import scoped_runtime_main
+            stack.enter_context(scoped_runtime_main({
+                k: getattr(agent, k, None) for k in
+                ("provider", "requested_provider", "model", "base_url", "api_key", "api_mode", "auth_mode", "session_id")}))
+        try:
+            check_compression_model_feasibility(agent)
+        except Exception as exc:
+            logger.debug("Compression feasibility re-check deferred to the next compaction: %s", exc)
+            return
     agent._compression_feasibility_checked = True
 
 
