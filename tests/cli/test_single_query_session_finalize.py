@@ -353,3 +353,109 @@ def test_quiet_single_query_main_finalizes_while_preserving_exit_code(monkeypatc
     assert ("claim", "cli", True) in calls
     assert ("run", "hello", []) in calls
     assert calls[-1] == ("finalize", "quiet-session")
+
+
+def _quiet_main_agent(monkeypatch, *, quiet):
+    """Run cli.main() with a fake CLI and return the agent it built.
+
+    Mirrors the harness in test_quiet_single_query_main_finalizes_while_
+    preserving_exit_code, but keeps the constructed agent so callers can
+    inspect the display callbacks the quiet path left attached.
+    """
+    import cli as cli_mod
+
+    captured = {}
+
+    class FakeCLI:
+        def __init__(self, **_kwargs):
+            self.provider = "test-provider"
+            self.model = "test-model"
+            self.session_id = "quiet-session"
+            self.conversation_history = []
+            self._active_agent_route_signature = "same-route"
+            self.console = SimpleNamespace(print=lambda *_a, **_k: None)
+            self.agent = SimpleNamespace(
+                session_id="quiet-session",
+                platform="cli",
+                quiet_mode=False,
+                suppress_status_output=False,
+                stream_delta_callback=object(),
+                tool_gen_callback=object(),
+                # Bound by _init_agent() from display.inline_diffs (default
+                # True); these are the callbacks that emit "┊ review diff".
+                tool_start_callback=object(),
+                tool_complete_callback=object(),
+                run_conversation=lambda **_kw: {"final_response": "done"},
+            )
+            captured["agent"] = self.agent
+
+        def _claim_active_session(self, surface, *, stderr=False):
+            return True
+
+        def _ensure_runtime_credentials(self):
+            return True
+
+        def _resolve_turn_agent_config(self, effective_query):
+            return {
+                "signature": "same-route",
+                "model": None,
+                "runtime": None,
+                "request_overrides": None,
+            }
+
+        def _init_agent(self, **kwargs):
+            return True
+
+        # Non-quiet single-query path only.
+        def _show_security_advisories(self):
+            return None
+
+        def chat(self, query, images=None):
+            return "done"
+
+        def _print_exit_summary(self):
+            return None
+
+    monkeypatch.delenv("HERMES_KANBAN_TASK", raising=False)
+    monkeypatch.delenv("HERMES_KANBAN_GOAL_MODE", raising=False)
+    monkeypatch.setattr(cli_mod, "HermesCLI", FakeCLI)
+    monkeypatch.setattr(cli_mod.atexit, "register", lambda *_a, **_k: None)
+    monkeypatch.setattr(cli_mod, "_finalize_single_query", lambda _cli: None)
+
+    # The quiet path ends with sys.exit(0) on success; the non-quiet path
+    # returns normally. Accept either.
+    try:
+        cli_mod.main(query="hello", quiet=quiet, toolsets="terminal")
+    except SystemExit as exc:
+        assert exc.code == 0
+    return captured["agent"]
+
+
+def test_quiet_single_query_detaches_inline_diff_callbacks(monkeypatch):
+    """`hermes chat -Q` must not leak "┊ review diff" chrome into stdout.
+
+    -Q's contract is "only the final response and the session_id line", but
+    the inline-diff callbacks were added later (935137f0d9) than -Q itself
+    (23270d41b9) and were never detached by the quiet path. Every write-capable
+    tool therefore printed a rendered diff to stdout, which the typed-task
+    executor then rejected as worker_output_proposal_only.
+    """
+    agent = _quiet_main_agent(monkeypatch, quiet=True)
+
+    assert agent.tool_start_callback is None
+    assert agent.tool_complete_callback is None
+    # The sibling callbacks the quiet path already handled stay detached.
+    assert agent.stream_delta_callback is None
+    assert agent.tool_gen_callback is None
+    assert agent.quiet_mode is True
+    assert agent.suppress_status_output is True
+
+
+def test_interactive_single_query_keeps_inline_diff_callbacks(monkeypatch):
+    """Non-quiet runs must keep inline diffs — the fix is quiet-only."""
+    agent = _quiet_main_agent(monkeypatch, quiet=False)
+
+    assert agent.tool_start_callback is not None
+    assert agent.tool_complete_callback is not None
+    assert agent.quiet_mode is False
+    assert agent.suppress_status_output is False

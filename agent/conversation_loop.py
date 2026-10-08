@@ -4045,7 +4045,16 @@ def run_conversation(
                     )
 
                 if agent.compression_enabled and _compressor.should_compress(_real_tokens):
-                    agent._safe_print("  ⟳ compacting context…")
+                    # Status chrome, not the answer. `suppress_status_output` is
+                    # the CLI automation mode (`hermes chat -Q`, oneshot) whose
+                    # contract is "only the final response and the session_id
+                    # line" on stdout. A raw _safe_print here bypassed that and
+                    # leaked "⟳ compacting context…" into captured stdout on
+                    # every compaction (observed 19x in one typed-task receipt).
+                    # Guarded rather than routed through _vprint so interactive
+                    # streaming keeps showing the line exactly as before.
+                    if not getattr(agent, "suppress_status_output", False):
+                        agent._safe_print("  ⟳ compacting context…")
                     messages, active_system_prompt = agent._compress_context(
                         messages, system_message,
                         approx_tokens=agent.context_compressor.last_prompt_tokens,

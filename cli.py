@@ -14580,6 +14580,17 @@ def main(
                         # status lines).  The response is printed once below.
                         cli.agent.stream_delta_callback = None
                         cli.agent.tool_gen_callback = None
+                        # Inline-diff callbacks are bound in _init_agent() from
+                        # display.inline_diffs (default True) and write the
+                        # "┊ review diff" chrome straight to stdout via _cprint.
+                        # -Q predates that feature (23270d41b9 vs 935137f0d9), so
+                        # the quiet contract ("only the final response and the
+                        # session_id line") was never enforced against them and
+                        # every write-capable tool leaked a diff into captured
+                        # stdout.  Detach them here, next to the sibling
+                        # callbacks they belong with.
+                        cli.agent.tool_start_callback = None
+                        cli.agent.tool_complete_callback = None
                         try:
                             result = cli.agent.run_conversation(
                                 user_message=effective_query,
