@@ -1541,6 +1541,27 @@ def test_doctor_reports_auxiliary_blocks_that_do_not_resolve(tmp_path, monkeypat
     assert len(issues) == 1 and "auxiliary.background_review" in issues[0] and "no-such-provider" in issues[0]
 
 
+def test_doctor_auxiliary_main_provider_keyword_is_not_a_false_positive(tmp_path, monkeypatch):
+    """auxiliary.<task>.provider: "main" is a real keyword (agent/auxiliary_client.py's
+    _normalize_aux_provider resolves it to whatever the main model's provider is, so a helper
+    task can reuse the main model instead of co-loading a second one). This validator used to
+    call a different, generic resolver that didn't know the keyword, so a working config
+    (verified live 2026-10-08: title_generation routed to the main model correctly) was reported
+    as a doctor finding - fails on the old code, passes on the fix."""
+    import hermes_yaml as yaml
+    from hermes_cli import doctor_config
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr("agent.auxiliary_client._read_main_provider", lambda: "openai")
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.safe_dump({"auxiliary": {
+        "title_generation": {"provider": "main"},
+    }}))
+    issues = []
+    doctor_config._validate_auxiliary_config(cfg_file, issues)
+    assert issues == [], f"'main' must resolve like the real dispatch path does, not be flagged: {issues}"
+
+
 @pytest.mark.platforms("macos")
 class TestMacOSTCCGrants:
     """macOS TCC grant persistence check (#86385): a cdhash-pinned DR (pre-#73681

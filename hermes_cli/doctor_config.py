@@ -317,8 +317,27 @@ def _validate_auxiliary_config(config_path, issues: list) -> None:
     ok = []
     for task, block in sorted(routed.items()):
         provider, model, base_url, api_key = (str(block.get(k) or "").strip() or None for k in ("provider", "model", "base_url", "api_key"))
+        # 2026-10-08: "main" is a real, documented auxiliary.<task>.provider value - the actual
+        # dispatch path (agent/auxiliary_client.py's _normalize_aux_provider) resolves it to
+        # whichever provider the main model is on, specifically so a helper task can reuse the
+        # main model instead of co-loading a second one (found live: this exact value is what
+        # stopped Hermes from loading a small model alongside a 97GB local flagship). This
+        # validator used a different, generic resolver that doesn't know about that keyword, so
+        # it reported a legitimate, working config as broken. Mirror the real resolution first.
+        resolve_provider = provider
+        if provider and provider.strip().lower() == "main":
+            try:
+                from agent.auxiliary_client import _read_main_provider
+                main_provider = (_read_main_provider() or "").strip().lower()
+            except Exception:
+                main_provider = ""
+            if main_provider and main_provider not in ("auto", "main"):
+                resolve_provider = main_provider
+            else:
+                check_ok(f"auxiliary.{task}.provider 'main' resolves to the main model (no main provider configured yet to name)")
+                continue
         try:
-            runtime = resolve_runtime_provider(requested=provider, target_model=model, explicit_api_key=api_key, explicit_base_url=base_url)
+            runtime = resolve_runtime_provider(requested=resolve_provider, target_model=model, explicit_api_key=api_key, explicit_base_url=base_url)
         except Exception as exc:  # noqa: BLE001 — every resolver error is a finding here
             _fail_and_issue(f"auxiliary.{task}.provider '{provider}' does not resolve", f"({str(exc).splitlines()[0]})",
                             f"auxiliary.{task}.provider '{provider}' cannot be resolved ({str(exc).splitlines()[0]}); the task "
