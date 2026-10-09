@@ -2998,10 +2998,29 @@ def _try_payment_fallback(
     return None, None, ""
 
 
+def _norm_base_url(url: str) -> str:
+    return (url or "").strip().rstrip("/").lower()
+
+
+def _read_main_base_url() -> str:
+    """Main agent endpoint: runtime override first, then config model.base_url."""
+    if isinstance(_RUNTIME_MAIN_BASE_URL, str) and _RUNTIME_MAIN_BASE_URL.strip():
+        return _RUNTIME_MAIN_BASE_URL.strip()
+    try:
+        from hermes_cli.config import load_config
+        model_cfg = load_config().get("model", {})
+        if isinstance(model_cfg, dict):
+            return str(model_cfg.get("base_url") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
 def _try_main_agent_model_fallback(
     failed_provider: str,
     task: str = None,
     reason: str = "error",
+    failed_base_url: str = "",
 ) -> Tuple[Optional[Any], Optional[str], str]:
     """Last-resort fallback to the user's main agent provider + model.
 
@@ -3022,9 +3041,15 @@ def _try_main_agent_model_fallback(
         return None, None, ""
 
     skip = (failed_provider or "").lower().strip()
+    main_base_url = ""
     if main_provider.lower() == skip:
-        # The thing that failed IS the main model — nothing to fall back to.
-        return None, None, ""
+        # The thing that failed IS the main model — nothing to fall back to,
+        # unless both share a generic label (e.g. "custom") but point at
+        # different endpoints: then the main endpoint is a real alternative.
+        main_base_url = _read_main_base_url()
+        if not (main_base_url and failed_base_url
+                and _norm_base_url(main_base_url) != _norm_base_url(failed_base_url)):
+            return None, None, ""
     if _is_provider_unhealthy(main_provider):
         _log_skip_unhealthy(main_provider, task)
         return None, None, ""
@@ -3032,6 +3057,7 @@ def _try_main_agent_model_fallback(
     try:
         client, resolved_model = resolve_provider_client(
             provider=main_provider, model=main_model,
+            explicit_base_url=main_base_url or None,
         )
     except Exception:
         client, resolved_model = None, None
@@ -5605,7 +5631,8 @@ def call_llm(
                     task, resolved_provider or "auto", reason=reason)
                 if fb_client is None:
                     fb_client, fb_model, fb_label = _try_main_agent_model_fallback(
-                        resolved_provider, task, reason=reason)
+                        resolved_provider, task, reason=reason,
+                        failed_base_url=str(getattr(client, "base_url", "") or ""))
 
             if fb_client is not None:
                 fb_kwargs = _build_call_kwargs(
@@ -6048,7 +6075,8 @@ async def async_call_llm(
                     task, resolved_provider or "auto", reason=reason)
                 if fb_client is None:
                     fb_client, fb_model, fb_label = _try_main_agent_model_fallback(
-                        resolved_provider, task, reason=reason)
+                        resolved_provider, task, reason=reason,
+                        failed_base_url=str(getattr(client, "base_url", "") or ""))
 
             if fb_client is not None:
                 fb_kwargs = _build_call_kwargs(
