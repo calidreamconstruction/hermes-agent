@@ -368,6 +368,7 @@ class BaseEnvironment(ABC):
         probe shows login bash itself is dead, in which case prefer ``bash -c``."""
         bootstrap = _snapshot_bootstrap_script(
             excluded_names=self._snapshot_excluded_passthrough_names(), **self._snapshot_script_kwargs(self.cwd))
+        proc = None
         try:
             proc = self._run_bash(bootstrap, login=True, timeout=self._snapshot_timeout)
             result = self._wait_for_process(proc, timeout=self._snapshot_timeout)
@@ -388,6 +389,15 @@ class BaseEnvironment(ABC):
                 logger.warning(
                     "init_session failed (session=%s): %s — falling back to bash -l per command",
                     self._session_id, detail)
+        finally:
+            # This path bypasses execute()'s finally, so drop the crash-recovery ledger
+            # entry here: a finished snapshot group must not linger in the ledger.
+            try:
+                if proc is not None:
+                    from tools.environments.fg_group_ledger import unregister_spawned_group
+                    unregister_spawned_group(proc)
+            except Exception:
+                logger.debug("fg-group ledger unregister (snapshot) failed", exc_info=True)
 
     def _probe_nonlogin_fallback(self, detail: str) -> tuple[bool, str]:
         """Run ``true`` under non-login bash; return ``(prefer_nonlogin, detail)``."""
@@ -681,6 +691,13 @@ class BaseEnvironment(ABC):
             finally:
                 with _live_foreground_cond:
                     _live_foreground.pop(id(spawned), None)
+                # Drop the crash-recovery ledger entry now the group is finished: the
+                # startup reaper only targets groups whose owner died mid-flight.
+                try:
+                    from tools.environments.fg_group_ledger import unregister_spawned_group
+                    unregister_spawned_group(spawned)
+                except Exception:
+                    logger.debug("fg-group ledger unregister failed", exc_info=True)
 
         def _on_timeout() -> None:
             if proc_holder:

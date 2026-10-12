@@ -1081,6 +1081,17 @@ class LocalEnvironment(BaseEnvironment):
                 # platform, macOS included.
                 from gateway.status import get_process_start_time
                 proc._hermes_pgid_start = get_process_start_time(proc.pid)
+            # Ledger the group so a Hermes that dies WITHOUT firing atexit (SIGKILL, OOM,
+            # host power loss) has its orphaned groups reaped at the next startup —
+            # otherwise a long scan from a dead session keeps burning cores and can
+            # load-spike the host. Never raises; ledger I/O must not break execution.
+            with contextlib.suppress(Exception):
+                from tools.environments.fg_group_ledger import register_spawned_group
+                register_spawned_group(proc, getattr(proc, "_hermes_pgid", None), cmd_string)
+            # Once-per-interpreter orphan sweep (own hook shape as _maybe_reap_docker_orphans).
+            with contextlib.suppress(Exception):
+                from tools.environments.fg_group_ledger import maybe_reap_orphan_groups
+                maybe_reap_orphan_groups()
         if stdin_data is not None:
             _pipe_stdin(proc, stdin_data)
         return proc
