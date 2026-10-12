@@ -126,6 +126,32 @@ HARDLINE_PATTERNS = [
     (_CMDPOS + r'init\s+[06]\b', "init 0/6 (shutdown/reboot)"),
     (_CMDPOS + r'systemctl\s+(poweroff|reboot|halt|kexec)\b', "systemctl poweroff/reboot"),
     (_CMDPOS + r'telinit\s+[06]\b', "telinit 0/6 (shutdown/reboot)"),
+    # Added 2026-10-08 after a live incident: a weak fallback model (not this
+    # harness's primary) ran `ollama rm` on a 104.9 GiB flagship model plus 3
+    # others at 23:01, based on an invented RAM-usage theory, with no approval
+    # prompt (model deletion was not on ANY blocklist). Local model weights and
+    # the HuggingFace/Ollama/MLX stores that hold them have no recovery path
+    # once removed (no backup covers models that are "re-downloadable" in
+    # principle - that doesn't help when the weights are gone and the model
+    # is large/rare/custom-converted). This must be unconditional - no model,
+    # however weak or confident, may delete installed model weights without
+    # the owner naming the exact model by name in his own words.
+    (_CMDPOS + r'ollama\s+rm\s+\S', "delete an installed Ollama model"),
+    (r'(?:curl|wget)\b[^\n]{0,200}-X\s*DELETE[^\n]{0,200}/api/(?:delete|pull_cancel)\b',
+     "Ollama API model-delete request"),
+    (r'(?:curl|wget)\b[^\n]{0,200}/api/delete\b[^\n]{0,200}-X\s*DELETE',
+     "Ollama API model-delete request"),
+    (_RM_FLAG_PREFIX + _hardline_rm_path(
+        r'(?:~|\$\{?HOME\}?)/(?:\.ollama(?:-mirror)?|\.cache/huggingface|'
+        r'\.hermes-standalone/models|\.lmstudio|\.mlx_models)(?:/[^\s]*)?'),
+     "recursive delete inside a local model weights store"),
+    # Same incident class: the controller repo, its git history, and any named
+    # backup directory are the estate's own irreplaceable state, not weights
+    # that can be re-pulled from a registry.
+    (_RM_FLAG_PREFIX + _hardline_rm_path(r'(?:~|\$\{?HOME\}?)/controller(?:/[^\s]*)?'),
+     "recursive delete inside ~/controller"),
+    (_RM_FLAG_PREFIX + _hardline_rm_path(r'[^\s]*/\.git(?:/[^\s]*)?'),
+     "recursive delete of a .git directory"),
 ]
 
 # Pre-compiled at module load so the hot-path matcher never pays the cold re.compile fan-out
