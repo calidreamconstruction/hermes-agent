@@ -1745,6 +1745,15 @@ def cmd_chat(args):
 
     _warn_retired_xai_models()
 
+    # Crash-recovery notice: a previous session killed mid-turn (SIGHUP/OOM/power
+    # loss) never printed its exit-summary resume hint. Tell the user how to pick
+    # it back up before the new session starts. Deterministic, stderr, never fatal.
+    try:
+        from hermes_cli.recovery_notice import print_interrupted_session_notice
+        print_interrupted_session_notice(args)
+    except Exception:
+        pass
+
     # First-run guard: the free-tier bootstrap runs first (synchronously here; it is the only thing
     # that may create the identity), then the inventory decides whether setup is needed.
     from hermes_cli.free_tier_bootstrap import run_bootstrap
