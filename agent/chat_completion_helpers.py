@@ -3886,7 +3886,9 @@ class _StreamingCall(StreamingWaitMonitor):
         crashed endpoint forever. Cloud values scale with context size and are
         floored for known reasoning models (else BrokenPipeError from the gateway)."""
         base = _configured_stale_base(self.agent)
-        if base == 180.0 and self.agent.base_url and is_local_endpoint(self.agent.base_url):
+        if (base == 180.0 and get_provider_stale_timeout(self.agent.provider, self.agent.model) is None
+                and "HERMES_STREAM_STALE_TIMEOUT" not in os.environ
+                and self.agent.base_url and is_local_endpoint(self.agent.base_url)):
             self._stream_stale_timeout = _local_stream_stale_timeout_default()
             logger.debug("Local provider detected (%s) — stale stream timeout set to %.0fs",
                 self.agent.base_url, self._stream_stale_timeout)

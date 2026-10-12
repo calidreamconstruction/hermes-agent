@@ -14,6 +14,9 @@ from hermes_cli import runtime_provider as rp
 def _no_live_builtin_provider_probes(monkeypatch):
     """Keep picker tests offline: builtin-provider catalog fetches hit the network."""
     monkeypatch.setattr("hermes_cli.models.fetch_api_models", lambda *_a, **_kw: None)
+    # Exercise generic discovery mocks below, never a real local Ollama catalog.
+    monkeypatch.setattr("hermes_cli.models_local.should_use_ollama_native_catalog",
+                        lambda *_a, **_kw: False)
     monkeypatch.setattr(
         "hermes_cli.models.cached_provider_model_ids", lambda *_a, **_kw: []
     )
@@ -725,3 +728,31 @@ def test_cli_picker_provider_select_reads_the_disk_cached_catalog(monkeypatch):
     assert seen == ["azure-foundry"]
     assert self_._model_picker_state["stage"] == "model"
     assert self_._model_picker_state["model_list"] == ["gpt-5.4"]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_section3_shared_endpoint_respects_any_discovery_opt_out(monkeypatch, reverse):
+    """A curated provider must not be overwritten by another alias's discovery."""
+    monkeypatch.setattr("agent.models_dev.fetch_models_dev", dict)
+    monkeypatch.setattr("hermes_cli.providers.HERMES_OVERLAYS", {})
+    probed = []
+    def fetch(*args, **kwargs):
+        probed.append(args)
+        return ["unrequested-remote-model"]
+    monkeypatch.setattr("hermes_cli.models.fetch_api_models", fetch)
+    entries = [
+        ("local-runtime", {"name": "Local runtime", "api": "http://models.test:18080/v1",
+                           "models": {"local-model": {"context_length": 8192}}}),
+        ("curated-runtime", {"name": "Curated runtime", "api": "http://models.test:18080/v1",
+                             "discover_models": False,
+                             "models": {"curated-model": {"context_length": 32768}}}),
+    ]
+    if reverse:
+        entries.reverse()
+    providers = list_authenticated_providers(
+        current_provider=entries[0][0], user_providers=dict(entries), custom_providers=[],
+    )
+    rows = [row for row in providers if row.get("slug") == entries[0][0]]
+    assert len(rows) == 1
+    assert set(rows[0]["models"]) == {"local-model", "curated-model"}
+    assert not probed

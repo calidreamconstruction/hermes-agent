@@ -1011,6 +1011,9 @@ def _lap_user_provider_rows(b: _PickerBuild, user_providers: dict) -> None:
                 "headers": headers, "api_mode": ep_cfg.get("api_mode"),
                 "discovery_allowed": bool(api_url) and _discover_flag(ep_cfg), "raw_names": [], "aliases": set()}
         grp = ep_groups[group_key]
+        # Match custom_providers: an explicit opt-out pins the merged row,
+        # independent of declaration order (one alias must not widen another).
+        grp["discovery_allowed"] = grp["discovery_allowed"] and _discover_flag(ep_cfg)
         # ``default_model`` is the legacy key; ``model`` matches custom_providers.
         _absorb_entry_models(grp, ep_cfg, ep_cfg.get("default_model", "") or ep_cfg.get("model", ""))
         grp["raw_names"].append(display_name)

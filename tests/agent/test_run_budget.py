@@ -359,3 +359,20 @@ def test_wrapup_lands_in_the_persisted_row_via_pre_flush_hook(monkeypatch, tmp_p
         session_db.close()
 
 # ── turn clock stamping ────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("source", ["provider", "model", "environment"])
+def test_local_stream_explicit_180_is_not_implicit_default(monkeypatch, tmp_path, source):
+    from agent import chat_completion_helpers as helpers
+    body = {
+        "provider": "providers:\n  openai:\n    stale_timeout_seconds: 180\n",
+        "model": "providers:\n  openai:\n    models:\n      local-test:\n        stale_timeout_seconds: 180\n",
+        "environment": "",
+    }[source]
+    agent = _make_agent(tmp_path, monkeypatch, body, model="local-test",
+                        base_url="http://127.0.0.1:11434/v1")
+    if source == "environment":
+        monkeypatch.setenv("HERMES_STREAM_STALE_TIMEOUT", "180")
+    call = helpers._StreamingCall(agent, {"model": agent.model}, None)
+    call._resolve_stale_timeout()
+    assert call._stream_stale_timeout == 180.0
