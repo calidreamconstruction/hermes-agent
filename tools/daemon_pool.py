@@ -38,13 +38,31 @@ class DaemonThreadPoolExecutor(ThreadPoolExecutor):
     """ThreadPoolExecutor variant whose workers do not block process exit."""
 
     def _adjust_thread_count(self) -> None:
-        # Mirrors CPython's implementation (3.8–3.13) with two changes:
-        # daemon=True and no _threads_queues registration.
+        # Mirrors CPython's implementation with two changes: daemon=True and no
+        # _threads_queues registration. The worker context moved between
+        # versions (3.8–3.13 pass initializer/initargs; 3.14+ pass a prepared
+        # context), so resolve the worker args against the running interpreter.
         if self._idle_semaphore.acquire(timeout=0):
             return
 
         def weakref_cb(_, q=self._work_queue):
             q.put(None)
+
+        if hasattr(self, "_create_worker_context"):
+            # 3.14+: _worker(executor_reference, ctx, work_queue)
+            worker_args = (
+                weakref.ref(self, weakref_cb),
+                self._create_worker_context(),
+                self._work_queue,
+            )
+        else:
+            # 3.8–3.13: _worker(executor_reference, work_queue, initializer, initargs)
+            worker_args = (
+                weakref.ref(self, weakref_cb),
+                self._work_queue,
+                self._initializer,
+                self._initargs,
+            )
 
         num_threads = len(self._threads)
         if num_threads < self._max_workers:
@@ -52,12 +70,7 @@ class DaemonThreadPoolExecutor(ThreadPoolExecutor):
             t = threading.Thread(
                 name=thread_name,
                 target=_worker,
-                args=(
-                    weakref.ref(self, weakref_cb),
-                    self._work_queue,
-                    self._initializer,
-                    self._initargs,
-                ),
+                args=worker_args,
                 daemon=True,
             )
             t.start()
