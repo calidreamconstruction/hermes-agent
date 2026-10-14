@@ -1506,7 +1506,7 @@ def execute_code(
         # environment children and may be incompatible with external
         # interpreters (project mode can select a different venv), so they
         # must not shadow or poison the child's sys.path (#74817).
-        from tools.environments.local import _strip_hermes_owned_pythonpath
+        from tools.environments.local_pythonpath import _strip_hermes_owned_pythonpath
         _strip_hermes_owned_pythonpath(child_env)
         _hermes_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         _existing_pp = child_env.get("PYTHONPATH", "")
