@@ -66,7 +66,7 @@ def _redact_terminal_error_text(value: Any) -> str:
 # The terminal tool polls this during command execution so it can kill
 # long-running subprocesses immediately instead of blocking until timeout.
 # ---------------------------------------------------------------------------
-from tools.interrupt import is_interrupted, _interrupt_event  # noqa: F401 — re-exported
+from tools.interrupt import is_interrupted
 from tools.registry import tool_error
 from tools.shell_heredoc import strip_inert_heredoc_bodies
 # display_hermes_home imported lazily at call site (stale-module safety during hermes update)
@@ -372,7 +372,7 @@ def _docker_volume_uses_host_path(volume_spec: str) -> bool:
     )
 
 
-def _docker_has_host_access(config: Dict[str, Any]) -> bool:
+def _docker_has_host_access(config: dict[str, Any]) -> bool:
     """Return True when a Docker sandbox exposes host paths through bind mounts."""
     if config.get("env_type") != "docker":
         return False
@@ -423,7 +423,7 @@ def _validate_workdir(workdir: str) -> str | None:
     for ch in workdir:
         if not _is_safe_workdir_char(ch):
             return (
-                f"Blocked: workdir contains disallowed character {repr(ch)}. "
+                f"Blocked: workdir contains disallowed character {ch!r}. "
                 "Use a simple filesystem path without shell metacharacters."
             )
     return None
@@ -1096,10 +1096,10 @@ PTY: set pty=true for interactive CLIs (they hang without it). Pipe git output t
 """
 
 # Global state for environment lifecycle management
-_active_environments: Dict[str, Any] = {}
-_last_activity: Dict[str, float] = {}
+_active_environments: dict[str, Any] = {}
+_last_activity: dict[str, float] = {}
 _env_lock = threading.Lock()
-_creation_locks: Dict[str, threading.Lock] = {}  # Per-task locks for sandbox creation
+_creation_locks: dict[str, threading.Lock] = {}  # Per-task locks for sandbox creation
 _creation_locks_lock = threading.Lock()  # Protects _creation_locks dict itself
 _cleanup_thread = None
 _cleanup_running = False
@@ -1111,7 +1111,7 @@ _docker_orphan_reaper_ran = False
 _docker_orphan_reaper_lock = threading.Lock()
 
 
-def _maybe_reap_docker_orphans(container_config: Dict[str, Any]) -> None:
+def _maybe_reap_docker_orphans(container_config: dict[str, Any]) -> None:
     """Run the docker orphan reaper once per process, if enabled.
 
     Sweeps long-Exited containers labeled ``hermes-agent=1`` for the current
@@ -1184,7 +1184,7 @@ def _maybe_reap_docker_orphans(container_config: Dict[str, Any]) -> None:
 #
 # This is never exposed to the model -- only infrastructure code calls it.
 # Thread-safe because each task_id is unique per rollout.
-_task_env_overrides: Dict[str, Dict[str, Any]] = {}
+_task_env_overrides: dict[str, dict[str, Any]] = {}
 
 # ── Per-session cwd records (cwd rearchitecture, step 1) ────────────────────
 #
@@ -1200,7 +1200,7 @@ _task_env_overrides: Dict[str, Dict[str, Any]] = {}
 # here. Readers still use the legacy env.cwd ladder. Later steps flip
 # file_tools and _resolve_command_cwd to read this store, then delete the
 # env-side tracking + ownership guards.
-_session_cwd: Dict[str, str] = {}
+_session_cwd: dict[str, str] = {}
 _session_cwd_lock = threading.Lock()
 
 
@@ -1239,7 +1239,7 @@ def clear_session_cwd(session_key: str) -> None:
         _session_cwd.pop(session_key, None)
 
 
-def register_task_env_overrides(task_id: str, overrides: Dict[str, Any]):
+def register_task_env_overrides(task_id: str, overrides: dict[str, Any]):
     """
     Register environment overrides for a specific task/rollout.
 
@@ -1297,7 +1297,7 @@ def clear_task_env_overrides(task_id: str):
 # packages.  With per-session container isolation active (docker +
 # container_persistent: false), the collapse-to-"default" shortcut no longer
 # provides that sharing, so the spawn site registers an explicit alias.
-_container_aliases: Dict[str, str] = {}
+_container_aliases: dict[str, str] = {}
 _container_alias_lock = threading.Lock()
 
 
@@ -1412,7 +1412,7 @@ def _resolve_container_task_id(task_id: Optional[str]) -> str:
     return "default"
 
 
-def resolve_task_overrides(task_id: Optional[str]) -> Dict[str, Any]:
+def resolve_task_overrides(task_id: Optional[str]) -> dict[str, Any]:
     """Return the env overrides for *task_id*, raw key first then collapsed.
 
     ``register_task_env_overrides`` writes under the *raw* task/session id, but
@@ -1432,7 +1432,7 @@ def resolve_task_overrides(task_id: Optional[str]) -> Dict[str, Any]:
     )
 
 
-def _resolve_task_host_cwd(config: Dict[str, Any], task_id: Optional[str]) -> Optional[str]:
+def _resolve_task_host_cwd(config: dict[str, Any], task_id: Optional[str]) -> Optional[str]:
     """Host directory to bind-mount at ``/workspace`` for *task_id*'s container.
 
     The single owner of the cwd-mount policy, shared by every environment
@@ -1592,7 +1592,7 @@ def _ensure_terminal_env_bridged() -> None:
         logger.debug("terminal config → env fallback bridge failed", exc_info=True)
 
 
-def _get_env_config() -> Dict[str, Any]:
+def _get_env_config() -> dict[str, Any]:
     """Get terminal environment configuration from environment variables."""
     # Default image with Python and Node.js for maximum compatibility
     default_image = "nikolaik/python-nodejs:python3.11-nodejs20"
@@ -1725,7 +1725,7 @@ def _get_env_config() -> Dict[str, Any]:
     }
 
 
-def _get_modal_backend_state(modal_mode: object | None) -> Dict[str, Any]:
+def _get_modal_backend_state(modal_mode: object | None) -> dict[str, Any]:
     """Resolve direct vs managed Modal backend selection."""
     return resolve_modal_backend_state(
         modal_mode,
@@ -1734,7 +1734,7 @@ def _get_modal_backend_state(modal_mode: object | None) -> Dict[str, Any]:
     )
 
 
-def _ssh_config_from_config(config: Dict[str, Any]) -> dict:
+def _ssh_config_from_config(config: dict[str, Any]) -> dict:
     """Build the ``ssh_config`` dict passed to :func:`_create_environment`.
 
     Shared by the terminal tool's own get-or-create path and the lazy
@@ -1750,7 +1750,7 @@ def _ssh_config_from_config(config: Dict[str, Any]) -> dict:
     }
 
 
-def _container_config_from_config(config: Dict[str, Any]) -> dict:
+def _container_config_from_config(config: dict[str, Any]) -> dict:
     """Build the ``container_config`` dict passed to :func:`_create_environment`.
 
     Shared by the terminal tool's own get-or-create path and the lazy
@@ -1777,8 +1777,8 @@ def _container_config_from_config(config: Dict[str, Any]) -> dict:
 
 
 def _create_environment(env_type: str, image: str, cwd: str, timeout: int,
-                        ssh_config: dict = None, container_config: dict = None,
-                        local_config: dict = None,
+                        ssh_config: dict | None = None, container_config: dict | None = None,
+                        local_config: dict | None = None,
                         task_id: str = "default",
                         host_cwd: Optional[str] = None):
     """
@@ -2141,7 +2141,7 @@ def ensure_task_env(task_id: Optional[str] = None):
                 task_id=effective_task_id,
                 host_cwd=_resolve_task_host_cwd(config, task_id),
             )
-        except Exception as exc:  # noqa: BLE001 — best-effort bring-up
+        except Exception as exc:
             logger.warning(
                 "Lazy %s environment init failed for task %s: %s",
                 env_type, effective_task_id[:8], exc,
@@ -2634,7 +2634,7 @@ def terminal_tool(
     workdir: Optional[str] = None,
     pty: bool = False,
     notify_on_complete: bool = False,
-    watch_patterns: Optional[List[str]] = None,
+    watch_patterns: Optional[list[str]] = None,
 ) -> str:
     """
     Execute a command in the configured terminal environment.
@@ -3749,13 +3749,13 @@ def check_terminal_requirements() -> bool:
             if not docker:
                 logger.error("Docker executable not found in PATH or common install locations")
                 return False
-            result = subprocess.run([docker, "version"], capture_output=True, timeout=5, stdin=subprocess.DEVNULL)
+            result = subprocess.run([docker, "version"], check=False, capture_output=True, timeout=5, stdin=subprocess.DEVNULL)
             return result.returncode == 0
 
         elif env_type == "singularity":
             executable = shutil.which("apptainer") or shutil.which("singularity")
             if executable:
-                result = subprocess.run([executable, "--version"], capture_output=True, timeout=5, stdin=subprocess.DEVNULL)
+                result = subprocess.run([executable, "--version"], check=False, capture_output=True, timeout=5, stdin=subprocess.DEVNULL)
                 return result.returncode == 0
             return False
 
@@ -3832,7 +3832,7 @@ def check_terminal_requirements() -> bool:
             return _check_vercel_sandbox_requirements(config)
 
         elif env_type == "daytona":
-            from daytona import Daytona  # noqa: F401 — SDK presence check
+            from daytona import Daytona
             from agent.secret_scope import get_secret
             return get_secret("DAYTONA_API_KEY") is not None
 

@@ -12,6 +12,23 @@ import pytest
 # Unit tests: shared interrupt module
 # ---------------------------------------------------------------------------
 
+def test_terminal_polling_preserves_thread_scoped_interrupts():
+    """The terminal consumer must import and preserve the per-thread stop contract."""
+    from tools.terminal_tool import is_interrupted as terminal_interrupted
+    from tools.interrupt import set_interrupt
+
+    other_thread = threading.get_ident() + 1
+    set_interrupt(False)
+    set_interrupt(True, thread_id=other_thread)
+    try:
+        assert not terminal_interrupted()
+        set_interrupt(True)
+        assert terminal_interrupted()
+    finally:
+        set_interrupt(False)
+        set_interrupt(False, thread_id=other_thread)
+
+
 class TestInterruptModule:
     """Tests for tools/interrupt.py"""
 
