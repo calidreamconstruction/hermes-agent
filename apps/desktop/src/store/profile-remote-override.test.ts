@@ -4,7 +4,9 @@ import { $notifications } from './notifications'
 import {
   $profileRemoteOverrides,
   $remoteOverrideDialogProfile,
+  closeRemoteOverrideDialog,
   notifyRemoteOverrideAuthFailure,
+  openRemoteOverrideDialog,
   refreshProfileRemoteOverrides,
   remoteHostLabel
 } from './profile-remote-override'
@@ -110,5 +112,14 @@ describe('notifyRemoteOverrideAuthFailure', () => {
   it('ignores profiles without an override entirely', () => {
     expect(notifyRemoteOverrideAuthFailure('home', new Error('401 Unauthorized'))).toBe(false)
     expect($notifications.get()).toEqual([])
+  })
+})
+
+describe('dialog open/close atoms', () => {
+  it('opens for a profile and closes back to null', () => {
+    openRemoteOverrideDialog('work')
+    expect($remoteOverrideDialogProfile.get()).toBe('work')
+    closeRemoteOverrideDialog()
+    expect($remoteOverrideDialogProfile.get()).toBeNull()
   })
 })

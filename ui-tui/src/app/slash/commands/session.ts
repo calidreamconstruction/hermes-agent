@@ -1,5 +1,3 @@
-import { compactNumber } from '@hermes/shared/format'
-
 import { usageBarsText } from '../../../components/overlayPrimitives.js'
 import { introMsg, toTranscriptMessages } from '../../../domain/messages.js'
 import { sessionScopedModelArg, TUI_SESSION_MODEL_FLAG } from '../../../domain/slash.js'
@@ -13,8 +11,8 @@ import type {
   SlashExecResponse,
   VoiceToggleResponse
 } from '../../../gatewayTypes.js'
-import { t } from '../../../i18n/runtime.js'
 import { formatVoiceRecordKey, parseVoiceRecordKey } from '../../../lib/platform.js'
+import { fmtK } from '../../../lib/text.js'
 import type { PanelSection } from '../../../types.js'
 import { applyConfiguredTuiTheme } from '../../createGatewayEventHandler.js'
 import { DEFAULT_INDICATOR_STYLE, INDICATOR_STYLES, type IndicatorStyle } from '../../interfaces.js'
@@ -22,14 +20,11 @@ import { patchOverlayState } from '../../overlayStore.js'
 import { patchUiState } from '../../uiStore.js'
 import type { SlashCommand } from '../types.js'
 
+const USAGE_CTA = 'Run /subscription to change plan · /topup to add to your balance'
+
 const TUI_SESSION_MODEL_RE = new RegExp(`(?:^|\\s)${TUI_SESSION_MODEL_FLAG}(?:\\s|$)`)
 const REASONING_SESSION_FLAGS = new Set(['--session'])
 const REASONING_GLOBAL_FLAGS = new Set(['--global'])
-
-type FastModeWord = 'fast' | 'normal' | 'ultrafast'
-
-// `config.get/set fast` answer fast | ultrafast | normal (auto/cold windows read as normal here).
-const fastModeWord = (value: unknown): FastModeWord => (value === 'fast' || value === 'ultrafast' ? value : 'normal')
 
 const modelValueForConfigSet = (arg: string) => {
   const trimmed = arg.trim()
@@ -83,12 +78,12 @@ const reasoningConfigPayload = (arg: string, sid: string) => {
 
 export const sessionCommands: SlashCommand[] = [
   {
-    aliases: ['background'],
+    aliases: ['bg', 'btw'],
     help: 'launch a background prompt',
-    name: 'bg',
+    name: 'background',
     run: (arg, ctx) => {
       if (!arg) {
-        return ctx.transcript.sys(t('slashCmd.session.bg.usage'))
+        return ctx.transcript.sys('/background <prompt>')
       }
 
       ctx.gateway.rpc<BackgroundStartResponse>('prompt.background', { session_id: ctx.sid, text: arg }).then(
@@ -98,27 +93,7 @@ export const sessionCommands: SlashCommand[] = [
           }
 
           patchUiState(state => ({ ...state, bgTasks: new Set(state.bgTasks).add(r.task_id!) }))
-          ctx.transcript.sys(t('slashCmd.session.bg.started', r.task_id))
-        })
-      )
-    }
-  },
-
-  {
-    help: 'ask a side question about this conversation',
-    name: 'btw',
-    run: (arg, ctx) => {
-      if (!arg) {
-        return ctx.transcript.sys(t('slashCmd.session.btw.usage'))
-      }
-
-      ctx.gateway.rpc<BackgroundStartResponse>('prompt.btw', { session_id: ctx.sid, text: arg }).then(
-        ctx.guarded<BackgroundStartResponse>(r => {
-          if (!r.task_id) {
-            return
-          }
-
-          ctx.transcript.sys(t('slashCmd.session.btw.answering', r.task_id))
+          ctx.transcript.sys(`bg ${r.task_id} started`)
         })
       )
     }
@@ -154,12 +129,12 @@ export const sessionCommands: SlashCommand[] = [
               if (r.confirm_required) {
                 patchOverlayState({
                   confirm: {
-                    cancelLabel: t('slashCmd.session.model.cancel'),
-                    confirmLabel: t('slashCmd.session.model.switchAnyway'),
+                    cancelLabel: 'Cancel',
+                    confirmLabel: 'Switch anyway',
                     danger: true,
-                    detail: r.confirm_message || r.warning || t('slashCmd.session.model.expensiveDetail'),
+                    detail: r.confirm_message || r.warning || 'This model has unusually high known pricing.',
                     onConfirm: () => switchModel(true),
-                    title: t('slashCmd.session.model.expensiveTitle')
+                    title: 'Expensive model selection'
                   }
                 })
 
@@ -167,14 +142,10 @@ export const sessionCommands: SlashCommand[] = [
               }
 
               if (!r.value) {
-                return ctx.transcript.sys(t('slashCmd.session.model.invalidResponse'))
+                return ctx.transcript.sys('error: invalid response: model switch')
               }
 
-              ctx.transcript.sys(
-                r.deferred
-                  ? t('slashCmd.session.model.switchedDeferred', r.value)
-                  : t('slashCmd.session.model.switched', r.value)
-              )
+              ctx.transcript.sys(r.deferred ? `model → ${r.value} (applies next turn)` : `model → ${r.value}`)
               ctx.local.maybeWarn(r)
 
               patchUiState(state => ({
@@ -206,7 +177,7 @@ export const sessionCommands: SlashCommand[] = [
       // CLOSE the current one, so guard it while a turn is in-flight to avoid
       // corrupting streaming/busy state. Bare opens the overlay to browse.
       if (trimmed) {
-        if (ctx.session.guardBusySessionSwitch(t('slashCmd.session.sessions.busyGuardAction'))) {
+        if (ctx.session.guardBusySessionSwitch('switch sessions')) {
           return
         }
 
@@ -237,12 +208,7 @@ export const sessionCommands: SlashCommand[] = [
             ctx.session.resetVisibleHistory(r.info ?? null)
           }
 
-          const value = r.value || t('slashCmd.session.personality.defaultValue')
-          ctx.transcript.sys(
-            r.history_reset
-              ? t('slashCmd.session.personality.changedCleared', value)
-              : t('slashCmd.session.personality.changed', value)
-          )
+          ctx.transcript.sys(`personality: ${r.value || 'default'}${r.history_reset ? ' · transcript cleared' : ''}`)
           ctx.local.maybeWarn(r)
         })
       )
@@ -291,17 +257,11 @@ export const sessionCommands: SlashCommand[] = [
             }
 
             if ((r.removed ?? 0) <= 0) {
-              return ctx.transcript.sys(t('slashCmd.session.compress.nothing'))
+              return ctx.transcript.sys('nothing to compress')
             }
 
-            const removed = r.removed ?? 0
-            const count = String(removed)
-            const tok = r.usage?.total ? t('slashCmd.session.compress.tokSuffix', compactNumber(r.usage.total)) : ''
-
             ctx.transcript.sys(
-              (removed === 1
-                ? t('slashCmd.session.compress.compressedOne', count)
-                : t('slashCmd.session.compress.compressedOther', count)) + tok
+              `compressed ${r.removed} messages${r.usage?.total ? ` · ${fmtK(r.usage.total)} tok` : ''}`
             )
           })
         )
@@ -325,7 +285,7 @@ export const sessionCommands: SlashCommand[] = [
           void ctx.session.closeSession(prevSid)
           patchUiState({ sid: r.session_id })
           ctx.session.setSessionStartedAt(Date.now())
-          ctx.transcript.sys(t('slashCmd.session.branch.branched', r.title ?? ''))
+          ctx.transcript.sys(`branched → ${r.title ?? ''}`)
         })
       )
     }
@@ -375,19 +335,19 @@ export const sessionCommands: SlashCommand[] = [
           // _toggle_voice_tts output shape so users don't have to learn
           // two vocabularies.
           if (action === 'status') {
-            const mode = r.enabled ? t('slashCmd.session.voice.on') : t('slashCmd.session.voice.off')
-            const tts = r.tts ? t('slashCmd.session.voice.on') : t('slashCmd.session.voice.off')
-            ctx.transcript.sys(t('slashCmd.session.voice.statusTitle'))
-            ctx.transcript.sys(t('slashCmd.session.voice.statusMode', mode))
-            ctx.transcript.sys(t('slashCmd.session.voice.statusTts', tts))
-            ctx.transcript.sys(t('slashCmd.session.voice.statusRecordKey', recordKeyLabel))
+            const mode = r.enabled ? 'ON' : 'OFF'
+            const tts = r.tts ? 'ON' : 'OFF'
+            ctx.transcript.sys('Voice Mode Status')
+            ctx.transcript.sys(`  Mode:       ${mode}`)
+            ctx.transcript.sys(`  TTS:        ${tts}`)
+            ctx.transcript.sys(`  Record key: ${recordKeyLabel}`)
 
             // CLI's "Requirements:" block — surfaces STT/audio setup issues
             // so the user sees "STT provider: MISSING ..." instead of
             // silently failing on every record-key press.
             if (r.details) {
               ctx.transcript.sys('')
-              ctx.transcript.sys(t('slashCmd.session.voice.requirements'))
+              ctx.transcript.sys('  Requirements:')
 
               for (const line of r.details.split('\n')) {
                 if (line.trim()) {
@@ -400,15 +360,16 @@ export const sessionCommands: SlashCommand[] = [
           }
 
           if (action === 'tts') {
-            ctx.transcript.sys(r.tts ? t('slashCmd.session.voice.ttsEnabled') : t('slashCmd.session.voice.ttsDisabled'))
+            ctx.transcript.sys(`Voice TTS ${r.tts ? 'enabled' : 'disabled'}.`)
 
             return
           }
 
           // on/off — mirror cli.py:_enable_voice_mode's 3-line output
           if (r.enabled) {
-            ctx.transcript.sys(r.tts ? t('slashCmd.session.voice.enabledWithTts') : t('slashCmd.session.voice.enabled'))
-            ctx.transcript.sys(t('slashCmd.session.voice.recordHint', recordKeyLabel))
+            const tts = r.tts ? ' (TTS enabled)' : ''
+            ctx.transcript.sys(`Voice mode enabled${tts}`)
+            ctx.transcript.sys(`  ${recordKeyLabel} to start/stop recording`)
 
             // Spoken-stop hint — backend-sourced from voice.stop_phrases so a
             // custom phrase renders correctly; absent/empty means the feature
@@ -417,10 +378,10 @@ export const sessionCommands: SlashCommand[] = [
               ctx.transcript.sys(`  ${r.stop_hint}`)
             }
 
-            ctx.transcript.sys(t('slashCmd.session.voice.ttsHint'))
-            ctx.transcript.sys(t('slashCmd.session.voice.offHint'))
+            ctx.transcript.sys('  /voice tts  to toggle speech output')
+            ctx.transcript.sys('  /voice off  to disable voice mode')
           } else {
-            ctx.transcript.sys(t('slashCmd.session.voice.disabled'))
+            ctx.transcript.sys('Voice mode disabled.')
           }
         })
       )
@@ -444,8 +405,8 @@ export const sessionCommands: SlashCommand[] = [
         .request<SlashExecResponse>('slash.exec', { command: cmd.slice(1), session_id: ctx.sid })
         .then(
           ctx.guarded<SlashExecResponse>(r => {
-            const body = r.output || t('slashCmd.session.pet.noOutput')
-            ctx.transcript.sys(r.warning ? t('slashCmd.session.pet.warning', r.warning, body) : body)
+            const body = r.output || '/pet: no output'
+            ctx.transcript.sys(r.warning ? `warning: ${r.warning}\n${body}` : body)
           })
         )
         .catch(ctx.guardedErr)
@@ -462,15 +423,11 @@ export const sessionCommands: SlashCommand[] = [
       if (!value) {
         return ctx.gateway
           .rpc<ConfigGetValueResponse>('config.get', { key: 'theme' })
-          .then(
-            ctx.guarded<ConfigGetValueResponse>(r =>
-              ctx.transcript.sys(t('slashCmd.session.theme.current', r.value || 'auto'))
-            )
-          )
+          .then(ctx.guarded<ConfigGetValueResponse>(r => ctx.transcript.sys(`theme: ${r.value || 'auto'}`)))
       }
 
       if (!['auto', 'light', 'dark'].includes(value)) {
-        return ctx.transcript.sys(t('slashCmd.session.theme.usage'))
+        return ctx.transcript.sys('usage: /theme [auto|light|dark]')
       }
 
       // Apply only after the write is confirmed (mirrors /indicator): a
@@ -486,7 +443,7 @@ export const sessionCommands: SlashCommand[] = [
             }
 
             applyConfiguredTuiTheme(value)
-            ctx.transcript.sys(t('slashCmd.session.theme.switched', value))
+            ctx.transcript.sys(`theme → ${value}`)
           })
         )
         .catch(ctx.guardedErr)
@@ -500,20 +457,12 @@ export const sessionCommands: SlashCommand[] = [
       if (!arg) {
         return ctx.gateway
           .rpc<ConfigGetValueResponse>('config.get', { key: 'skin' })
-          .then(
-            ctx.guarded<ConfigGetValueResponse>(r =>
-              ctx.transcript.sys(t('slashCmd.session.skin.current', r.value || t('slashCmd.session.skin.defaultValue')))
-            )
-          )
+          .then(ctx.guarded<ConfigGetValueResponse>(r => ctx.transcript.sys(`skin: ${r.value || 'default'}`)))
       }
 
       ctx.gateway
         .rpc<ConfigSetResponse>('config.set', { key: 'skin', value: arg })
-        .then(
-          ctx.guarded<ConfigSetResponse>(
-            r => r.value && ctx.transcript.sys(t('slashCmd.session.skin.switched', r.value))
-          )
-        )
+        .then(ctx.guarded<ConfigSetResponse>(r => r.value && ctx.transcript.sys(`skin → ${r.value}`)))
     }
   },
 
@@ -529,13 +478,13 @@ export const sessionCommands: SlashCommand[] = [
           .rpc<ConfigGetValueResponse>('config.get', { key: 'indicator' })
           .then(
             ctx.guarded<ConfigGetValueResponse>(r =>
-              ctx.transcript.sys(t('slashCmd.session.indicator.current', r.value || DEFAULT_INDICATOR_STYLE))
+              ctx.transcript.sys(`indicator: ${r.value || DEFAULT_INDICATOR_STYLE}`)
             )
           )
       }
 
       if (!(INDICATOR_STYLES as readonly string[]).includes(value)) {
-        return ctx.transcript.sys(t('slashCmd.session.indicator.usage', INDICATOR_STYLES.join('|')))
+        return ctx.transcript.sys(`usage: /indicator [${INDICATOR_STYLES.join('|')}]`)
       }
 
       ctx.gateway.rpc<ConfigSetResponse>('config.set', { key: 'indicator', value }).then(
@@ -548,7 +497,7 @@ export const sessionCommands: SlashCommand[] = [
           // uses the new style without waiting for the 5s mtime poll
           // to re-apply config.full.
           patchUiState({ indicatorStyle: value as IndicatorStyle })
-          ctx.transcript.sys(t('slashCmd.session.indicator.switched', r.value))
+          ctx.transcript.sys(`indicator → ${r.value}`)
         })
       )
     }
@@ -560,11 +509,7 @@ export const sessionCommands: SlashCommand[] = [
     run: (_arg, ctx) => {
       ctx.gateway
         .rpc<ConfigSetResponse>('config.set', { key: 'yolo', session_id: ctx.sid })
-        .then(
-          ctx.guarded<ConfigSetResponse>(r =>
-            ctx.transcript.sys(r.value === '1' ? t('slashCmd.session.yolo.on') : t('slashCmd.session.yolo.off'))
-          )
-        )
+        .then(ctx.guarded<ConfigSetResponse>(r => ctx.transcript.sys(`yolo ${r.value === '1' ? 'on' : 'off'}`)))
     }
   },
 
@@ -577,9 +522,7 @@ export const sessionCommands: SlashCommand[] = [
           .rpc<ConfigGetValueResponse>('config.get', { key: 'reasoning', session_id: ctx.sid })
           .then(
             ctx.guarded<ConfigGetValueResponse>(
-              r =>
-                r.value &&
-                ctx.transcript.sys(t('slashCmd.session.reasoning.currentWithDisplay', r.value, r.display || 'hide'))
+              r => r.value && ctx.transcript.sys(`reasoning: ${r.value} · display ${r.display || 'hide'}`)
             )
           )
       }
@@ -604,21 +547,21 @@ export const sessionCommands: SlashCommand[] = [
             }))
           }
 
-          ctx.transcript.sys(t('slashCmd.session.reasoning.current', r.value))
+          ctx.transcript.sys(`reasoning: ${r.value}`)
         })
       )
     }
   },
 
   {
-    help: 'toggle fast mode [normal|fast|ultrafast|status|on|off|toggle]',
+    help: 'toggle fast mode [normal|fast|status|on|off|toggle]',
     name: 'fast',
     run: (arg, ctx) => {
       const mode = arg.trim().toLowerCase()
-      const valid = new Set(['', 'status', 'normal', 'fast', 'ultrafast', 'on', 'off', 'toggle'])
+      const valid = new Set(['', 'status', 'normal', 'fast', 'on', 'off', 'toggle'])
 
       if (!valid.has(mode)) {
-        return ctx.transcript.sys(t('slashCmd.session.fast.usage'))
+        return ctx.transcript.sys('usage: /fast [normal|fast|status|on|off|toggle]')
       }
 
       if (!mode || mode === 'status') {
@@ -626,7 +569,7 @@ export const sessionCommands: SlashCommand[] = [
           .rpc<ConfigGetValueResponse>('config.get', { key: 'fast', session_id: ctx.sid })
           .then(
             ctx.guarded<ConfigGetValueResponse>(r =>
-              ctx.transcript.sys(t('slashCmd.session.fast.mode', fastModeWord(r.value)))
+              ctx.transcript.sys(`fast mode: ${r.value === 'fast' ? 'fast' : 'normal'}`)
             )
           )
           .catch(ctx.guardedErr)
@@ -636,15 +579,15 @@ export const sessionCommands: SlashCommand[] = [
         .rpc<ConfigSetResponse>('config.set', { key: 'fast', session_id: ctx.sid, value: mode })
         .then(
           ctx.guarded<ConfigSetResponse>(r => {
-            const next = fastModeWord(r.value)
-            ctx.transcript.sys(t('slashCmd.session.fast.mode', next))
+            const next = r.value === 'fast' ? 'fast' : 'normal'
+            ctx.transcript.sys(`fast mode: ${next}`)
             patchUiState(state => ({
               ...state,
               info: state.info
                 ? {
                     ...state.info,
-                    fast: next !== 'normal',
-                    service_tier: { fast: 'priority', normal: '', ultrafast: 'ultrafast' }[next]
+                    fast: next === 'fast',
+                    service_tier: next === 'fast' ? 'priority' : ''
                   }
                 : state.info
             }))
@@ -662,7 +605,7 @@ export const sessionCommands: SlashCommand[] = [
       const valid = new Set(['', 'status', 'queue', 'steer', 'interrupt'])
 
       if (!valid.has(mode)) {
-        return ctx.transcript.sys(t('slashCmd.session.busy.usage'))
+        return ctx.transcript.sys('usage: /busy [queue|steer|interrupt|status]')
       }
 
       if (!mode || mode === 'status') {
@@ -671,7 +614,7 @@ export const sessionCommands: SlashCommand[] = [
           .then(
             ctx.guarded<ConfigGetValueResponse>(r => {
               const current = r.value || 'interrupt'
-              ctx.transcript.sys(t('slashCmd.session.busy.mode', current))
+              ctx.transcript.sys(`busy input mode: ${current}`)
             })
           )
           .catch(ctx.guardedErr)
@@ -682,7 +625,7 @@ export const sessionCommands: SlashCommand[] = [
         .then(
           ctx.guarded<ConfigSetResponse>(r => {
             const next = r.value || mode
-            ctx.transcript.sys(t('slashCmd.session.busy.mode', next))
+            ctx.transcript.sys(`busy input mode: ${next}`)
           })
         )
         .catch(ctx.guardedErr)
@@ -695,11 +638,7 @@ export const sessionCommands: SlashCommand[] = [
     run: (arg, ctx) => {
       ctx.gateway
         .rpc<ConfigSetResponse>('config.set', { key: 'verbose', session_id: ctx.sid, value: arg || 'cycle' })
-        .then(
-          ctx.guarded<ConfigSetResponse>(
-            r => r.value && ctx.transcript.sys(t('slashCmd.session.verbose.current', r.value))
-          )
-        )
+        .then(ctx.guarded<ConfigSetResponse>(r => r.value && ctx.transcript.sys(`verbose: ${r.value}`)))
     }
   },
 
@@ -730,15 +669,11 @@ export const sessionCommands: SlashCommand[] = [
 
         if (usageModel?.available && (barLines.length || usageModel.status === 'free')) {
           const sections: PanelSection[] = []
-
-          const plan =
-            usageModel.plan_name ?? (usageModel.status === 'free' ? t('slashCmd.session.usage.freePlan') : null)
+          const plan = usageModel.plan_name ?? (usageModel.status === 'free' ? 'Free' : null)
 
           if (plan) {
             sections.push({
-              text: usageModel.renews_display
-                ? t('slashCmd.session.usage.planRenews', plan, usageModel.renews_display)
-                : t('slashCmd.session.usage.plan', plan)
+              text: `Plan: ${plan}${usageModel.renews_display ? ` · renews ${usageModel.renews_display}` : ''}`
             })
           }
 
@@ -747,33 +682,30 @@ export const sessionCommands: SlashCommand[] = [
           }
 
           if (usageModel.status === 'free') {
-            sections.push({ text: t('slashCmd.session.usage.freeNote') })
+            sections.push({ text: '> Free · free models only. Run /subscription to reach paid models.' })
           } else if (usageModel.status === 'low') {
             sections.push({
-              text: t(
-                'slashCmd.session.usage.lowNote',
-                usageModel.total_spendable_display ?? t('slashCmd.session.usage.lowBalanceFallback')
-              )
+              text: `! Low balance · ${usageModel.total_spendable_display ?? 'under $5'} left. Run /topup or /subscription.`
             })
           }
 
-          ctx.transcript.panel(t('slashCmd.session.usage.balanceTitle'), sections)
+          ctx.transcript.panel('Balance', sections)
           showedBalance = true
         } else {
           const creditsLines = r?.credits_lines ?? []
 
           if (creditsLines.length) {
-            ctx.transcript.panel(t('slashCmd.session.usage.nousBalanceTitle'), [{ text: creditsLines.join('\n') }])
+            ctx.transcript.panel('Nous balance', [{ text: creditsLines.join('\n') }])
             showedBalance = true
           }
         }
 
         if (!r?.calls) {
           if (!showedBalance) {
-            sys(t('slashCmd.session.usage.noCalls'))
+            sys('no API calls yet')
           }
 
-          sys(t('slashCmd.session.usage.cta'))
+          sys(USAGE_CTA)
 
           return
         }
@@ -781,34 +713,26 @@ export const sessionCommands: SlashCommand[] = [
         const f = (v: number | undefined) => (v ?? 0).toLocaleString()
 
         const rows: [string, string][] = [
-          [t('slashCmd.session.usage.rowModel'), r.model ?? ''],
-          [t('slashCmd.session.usage.rowInputTokens'), f(r.input)],
-          [t('slashCmd.session.usage.rowOutputTokens'), f(r.output)],
-          [t('slashCmd.session.usage.rowTotalTokens'), f(r.total)],
-          [t('slashCmd.session.usage.rowApiCalls'), f(r.calls)]
+          ['Model', r.model ?? ''],
+          ['Input tokens', f(r.input)],
+          ['Output tokens', f(r.output)],
+          ['Total tokens', f(r.total)],
+          ['API calls', f(r.calls)]
         ]
 
         const sections: PanelSection[] = [{ rows }]
 
         if (r.context_max) {
-          const mark = r.context_estimated ? '~' : ''
-          sections.push({
-            text: t(
-              'slashCmd.session.usage.context',
-              `${mark}${f(r.context_used)}`,
-              f(r.context_max),
-              `${mark}${r.context_percent}`
-            )
-          })
+          sections.push({ text: `Context: ${f(r.context_used)} / ${f(r.context_max)} (${r.context_percent}%)` })
         }
 
         if (r.compressions) {
-          sections.push({ text: t('slashCmd.session.usage.compressions', String(r.compressions)) })
+          sections.push({ text: `Compressions: ${r.compressions}` })
         }
 
-        ctx.transcript.panel(t('slashCmd.session.usage.usageTitle'), sections)
+        ctx.transcript.panel('Usage', sections)
 
-        sys(t('slashCmd.session.usage.cta'))
+        sys(USAGE_CTA)
       })
     }
   }

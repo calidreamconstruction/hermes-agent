@@ -3,46 +3,30 @@ import {
   type TextMessagePartProps,
   type ToolCallMessagePartProps,
   useAuiState,
-  useMessagePartReasoning,
-  useMessagePartText
+  useMessagePartReasoning
 } from '@assistant-ui/react'
 import { useStore } from '@nanostores/react'
 import { type ComponentProps, type FC, type ReactNode, useEffect, useRef, useState } from 'react'
 
-import { CatalogInstallTool } from '@/components/assistant-ui/catalog-install-tool'
-import { ClarifyTool } from '@/components/assistant-ui/clarify'
-import { ConnectorExecution, ConnectorTool } from '@/components/assistant-ui/connector-tool'
+import { ClarifyTool } from '@/components/assistant-ui/clarify-tool'
 import { MarkdownText, MarkdownTextContent } from '@/components/assistant-ui/markdown-text'
 import { McpSetupTool } from '@/components/assistant-ui/mcp-setup-tool'
-import { StartChatTool } from '@/components/assistant-ui/start-chat-tool'
 import { AgentDeliveryNotice, deliveryTargetFromCommand } from '@/components/assistant-ui/thread/agent-delivery'
 import { TimelineTimestamp } from '@/components/assistant-ui/thread/timeline-timestamp'
 import { DelegateTool } from '@/components/assistant-ui/tool/delegate'
 import { ToolFallback, ToolGroupSlot } from '@/components/assistant-ui/tool/fallback'
-import { parseMaybeObject, toolCallFailed } from '@/components/assistant-ui/tool/fallback-model'
 import { formatElapsed, useElapsedSeconds, useMeasuredDuration } from '@/components/chat/activity-timer'
 import { ActivityTimerText } from '@/components/chat/activity-timer-text'
 import { GeneratedImage } from '@/components/chat/generated-image-result'
 import { SCAFFOLD_LABEL_CLASS, SCAFFOLD_META_CLASS, ScaffoldRow } from '@/components/chat/scaffold-row'
-import { useOnboardingChatActive } from '@/components/onboarding-chat/assembly'
 import { useI18n } from '@/i18n'
-import { mcpTargets, toolLabels } from '@/lib/connector-tools'
 import { generatedImageFromResult } from '@/lib/generated-images'
 import { separateGluedReasoningBlocks } from '@/lib/reasoning-blocks'
-import { isTodoToolName } from '@/lib/todos'
-import { type CardToolName, isCardTool, isCardToolName } from '@/lib/tool-render-class'
 import { useEnterAnimation } from '@/lib/use-enter-animation'
 import { cn } from '@/lib/utils'
-import { $reasoningCollapsedByDefault, $showReasoning } from '@/store/reasoning-disclosure'
-import { useForcedTextDirection } from '@/store/text-direction'
-import { $showToolActivity } from '@/store/tool-activity'
+import { $reasoningCollapsedByDefault } from '@/store/reasoning-disclosure'
 
 type TimelineToolCallProps = ToolCallMessagePartProps & { completedAt?: number; timestamp?: number }
-
-// A call sealed without a result (turn stopped, completion event lost) is
-// neither pending nor successful; only the generic row can say so.
-const settledWithoutResult = ({ completedAt, result }: TimelineToolCallProps): boolean =>
-  result === undefined && completedAt !== undefined
 
 const ImageGenerateTool: FC<TimelineToolCallProps> = props => {
   const { args, completedAt, result, timestamp } = props
@@ -51,7 +35,7 @@ const ImageGenerateTool: FC<TimelineToolCallProps> = props => {
   // The image card owns successful generations. Failed or malformed results
   // still need the normal tool row: it extracts the error text and gives the
   // user an honest, expandable failure rather than silently dropping the call.
-  if (settledWithoutResult(props) || (result !== undefined && !generatedImageFromResult(result))) {
+  if (result !== undefined && !generatedImageFromResult(result)) {
     return <ToolFallback {...props} />
   }
 
@@ -66,7 +50,7 @@ const ImageGenerateTool: FC<TimelineToolCallProps> = props => {
 const DelegateToolPart: FC<TimelineToolCallProps> = props => {
   // A call that failed outright dispatched nothing — there are no children to
   // list, only an error. The generic row extracts and expands it properly.
-  if (props.isError || settledWithoutResult(props)) {
+  if (props.isError) {
     return <ToolFallback {...props} />
   }
 
@@ -78,64 +62,9 @@ const DelegateToolPart: FC<TimelineToolCallProps> = props => {
   )
 }
 
-const ClarifyToolPart: FC<TimelineToolCallProps> = props => {
-  // Stopped on this question, never answered: history. ClarifyTool reads
-  // the session's live clarify request, so a later turn's question would
-  // otherwise paint onto this row as a second live card.
-  if (settledWithoutResult(props)) {
-    return <ToolFallback {...props} />
-  }
-
-  return (
-    <>
-      <TimelineTimestamp className="mb-0.5 block" completedAt={props.completedAt} timestamp={props.timestamp} />
-      <ClarifyTool {...props} />
-    </>
-  )
-}
-
-const StartChatToolPart: FC<TimelineToolCallProps> = props => {
-  if (props.isError || settledWithoutResult(props)) {
-    return <ToolFallback {...props} />
-  }
-
-  return (
-    <>
-      <TimelineTimestamp className="mb-0.5 block" completedAt={props.completedAt} timestamp={props.timestamp} />
-      <StartChatTool {...props} />
-    </>
-  )
-}
-
-const ConnectionsToolPart: FC<TimelineToolCallProps> = props =>
-  mcpTargets(props.toolName, props.args).length > 0 ? <McpSetupTool {...props} /> : <ConnectorTool {...props} />
-
-const TOOL_CARDS: Record<CardToolName, FC<TimelineToolCallProps>> = {
-  clarify: ClarifyToolPart,
-  delegate_task: DelegateToolPart,
-  image_generate: ImageGenerateTool,
-  manage_catalog: CatalogInstallTool,
-  manage_connections: ConnectionsToolPart,
-  setup_choose: ClarifyToolPart,
-  start_chat: StartChatToolPart
-}
-
-// A failure the user still has to see. The gateway's tool.complete carries the
-// failure inside `result`, never as the top-level error that sets isError, so
-// this reads the body like the run summary does. A non-zero exit_code counts
-// too, matching the gateway's _tool_result_needs_user, which forwards terminal
-// {output, exit_code: 1, error: null} even with display.tool_progress off.
-const failedCallNeedsUser = (part: TimelineToolCallProps): boolean => {
-  const exitCode = parseMaybeObject(part.result).exit_code
-
-  return toolCallFailed(part) || (typeof exitCode === 'number' && exitCode !== 0)
-}
-
 const ChainToolFallback: FC<TimelineToolCallProps> = props => {
-  const showToolActivity = useStore($showToolActivity)
-
   // todo parts are hoisted to a dedicated panel above the message content.
-  if (isTodoToolName(props.toolName)) {
+  if (props.toolName === 'todo') {
     return null
   }
 
@@ -143,7 +72,7 @@ const ChainToolFallback: FC<TimelineToolCallProps> = props => {
   // compact "Messaged X" / "Message from X" notices, not a transcript row
   // (Grok-bots parity; the receiving side already renders notices via
   // AGENT_MESSAGE_RE). Non-delivery terminal calls fall through unchanged.
-  if (props.toolName === 'terminal' && !props.isError && !settledWithoutResult(props)) {
+  if (props.toolName === 'terminal' && !props.isError) {
     const command = typeof props.args?.command === 'string' ? props.args.command : ''
 
     if (deliveryTargetFromCommand(command)) {
@@ -158,47 +87,38 @@ const ChainToolFallback: FC<TimelineToolCallProps> = props => {
     return null
   }
 
-  if (isCardToolName(props.toolName)) {
-    const ToolCard = TOOL_CARDS[props.toolName]
-
-    return <ToolCard {...props} />
+  if (props.toolName === 'delegate_task') {
+    return <DelegateToolPart {...props} />
   }
 
-  if (toolLabels(props.args).length > 0) {
-    return <ConnectorExecution {...props} />
+  if (props.toolName === 'image_generate') {
+    return <ImageGenerateTool {...props} />
   }
 
-  // The tool feed (reads, searches, commands) follows display.tool_progress,
-  // never show_reasoning. Cards, approvals, and failed calls the user must act
-  // on remain regardless.
-  if (!showToolActivity && !failedCallNeedsUser(props) && !isCardTool(props.toolName)) {
-    return null
+  if (props.toolName === 'clarify') {
+    return (
+      <>
+        <TimelineTimestamp className="mb-0.5 block" completedAt={props.completedAt} timestamp={props.timestamp} />
+        <ClarifyTool {...props} />
+      </>
+    )
+  }
+
+  if (props.toolName === 'setup_mcp') {
+    return <McpSetupTool {...props} />
   }
 
   return <ToolFallback {...props} />
 }
 
-// Match the compact terminal/log viewers rather than the full thread's slack.
-const PREVIEW_RELOCK_THRESHOLD_PX = 24
-
 type TimelineTextPartProps = TextMessagePartProps & { completedAt?: number; timestamp?: number }
 
-const TimelineMarkdownText: FC<TimelineTextPartProps> = ({ completedAt, timestamp }) => {
-  const { text } = useMessagePartText()
-
-  // assistant-ui adds an empty continuation after a tool starts. It is not
-  // prose yet and must not create paragraph spacing above pending approvals.
-  if (!text.trim()) {
-    return null
-  }
-
-  return (
-    <>
-      <TimelineTimestamp className="mb-0.5 block" completedAt={completedAt} timestamp={timestamp} />
-      <MarkdownText />
-    </>
-  )
-}
+const TimelineMarkdownText: FC<TimelineTextPartProps> = ({ completedAt, timestamp }) => (
+  <>
+    <TimelineTimestamp className="mb-0.5 block" completedAt={completedAt} timestamp={timestamp} />
+    <MarkdownText />
+  </>
+)
 
 const ThinkingDisclosure: FC<{
   children: ReactNode
@@ -220,21 +140,9 @@ const ThinkingDisclosure: FC<{
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const contentRef = useRef<HTMLDivElement | null>(null)
   const enterRef = useEnterAnimation(messageRunning, timerKey)
-  // A live preview that later settles must not unmount its body — that is the
-  // "turn settled and everything jumped" shift. Latch that we showed one so
-  // the clip stays. Groups that mount already complete (earlier thoughts in
-  // a still-running turn) never latch, so they stay collapsed.
-  const [sawLivePreview, setSawLivePreview] = useState(false)
 
-  if (pending && !sawLivePreview) {
-    setSawLivePreview(true)
-  }
-
-  // The collapsed-by-default preference outranks the latch: it opts out of
-  // live previews entirely, so there is nothing to hold open.
-  const showPreview = !reasoningCollapsedByDefault && (pending || sawLivePreview)
-  const open = userOpen ?? showPreview
-  const isPreview = userOpen === null && showPreview
+  const open = userOpen ?? (pending && !reasoningCollapsedByDefault)
+  const isPreview = pending && userOpen === null && !reasoningCollapsedByDefault
 
   // Three ways a finished block can report itself. With a measured duration it
   // says so, unless the timer's whole seconds round it to "0s" — accurate and
@@ -253,7 +161,8 @@ const ThinkingDisclosure: FC<{
     }
   }
 
-  // Follow new tokens until the user scrolls up to read earlier reasoning.
+  // While the preview is live, pin the scroll container to the bottom on
+  // every content growth so the latest tokens are always visible.
   useEffect(() => {
     if (!isPreview) {
       return
@@ -271,18 +180,13 @@ const ThinkingDisclosure: FC<{
     // scrollHeight read+write per preview per frame. Only actual content
     // growth needs the pin; the height rides the RO entry, reflow-free.
     let lastHeight = -1
-    let following = true
-
-    const trackScroll = () => {
-      following = el.scrollHeight - el.scrollTop - el.clientHeight < PREVIEW_RELOCK_THRESHOLD_PX
-    }
 
     const pin = (entries: readonly ResizeObserverEntry[]) => {
       const height = entries[entries.length - 1]?.borderBoxSize?.[0]?.blockSize ?? -1
       const grew = height < 0 || height > lastHeight
       lastHeight = height
 
-      if (grew && following) {
+      if (grew) {
         el.scrollTop = el.scrollHeight
       }
     }
@@ -291,12 +195,8 @@ const ThinkingDisclosure: FC<{
     // layout already clean (still before paint), avoiding a forced reflow.
     const observer = new ResizeObserver(pin)
     observer.observe(content)
-    el.addEventListener('scroll', trackScroll, { passive: true })
 
-    return () => {
-      observer.disconnect()
-      el.removeEventListener('scroll', trackScroll)
-    }
+    return () => observer.disconnect()
     // Re-run when the disclosure toggles so the observer attaches to the new
     // DOM after expand/collapse (refs are conditionally rendered on `open`).
   }, [isPreview, open])
@@ -325,13 +225,10 @@ const ThinkingDisclosure: FC<{
           className={cn(
             // Body sits flush with the "Thinking" header — no left indent —
             // and inherits the disclosure-level opacity fade defined in
-            // styles.css (~0.67 at rest, 1 on hover/focus). overflow-auto so
-            // the max-h-40 preview is a real scroller, not a clip.
-            // Even a body that fits must hand vertical input to the thread.
-            'mt-0.5 w-full min-w-0 max-w-full overflow-auto overscroll-x-contain overscroll-y-auto wrap-anywhere pb-1',
+            // styles.css (~0.67 at rest, 1 on hover/focus).
+            'mt-0.5 w-full min-w-0 max-w-full overflow-hidden wrap-anywhere pb-1',
             isPreview && 'max-h-40'
           )}
-          data-slot="aui_thinking-body"
           ref={scrollRef}
         >
           <div ref={contentRef}>{children}</div>
@@ -350,13 +247,8 @@ const ReasoningAccordionGroup: FC<{ children?: ReactNode; endIndex: number; star
   endIndex,
   startIndex
 }) => {
-  const showReasoning = useStore($showReasoning)
   const messageId = useAuiState(s => s.message.id)
   const messageRunning = useAuiState(s => s.message.status?.type === 'running')
-  // The guide's reasoning is it reading its own runbook ("Now step 4: offer
-  // the layout picker"), and a first-time user reading that alongside the
-  // greeting breaks the one conversation the guide is trying to have.
-  const guidedChat = useOnboardingChatActive()
 
   const pending = useAuiState(
     s =>
@@ -395,7 +287,7 @@ const ReasoningAccordionGroup: FC<{ children?: ReactNode; endIndex: number; star
     }, undefined)
   )
 
-  if (!hasContent || guidedChat || !showReasoning) {
+  if (!hasContent) {
     return null
   }
 
@@ -423,24 +315,13 @@ const ReasoningTextPart: ReasoningMessagePartComponent = () => {
   const { status, text } = useMessagePartReasoning()
   const messageRunning = useAuiState(s => s.message.status?.type === 'running')
 
-  // The group above already hides grouped parts; this covers a Reasoning part
-  // rendered without a ReasoningGroup wrapper (assistant-ui drops the group
-  // when a ChainOfThought component is registered).
-  const showReasoning = useStore($showReasoning)
-  const textDirection = useForcedTextDirection()
-
-  if (!showReasoning) {
-    return null
-  }
-
   return (
     <MarkdownTextContent
       containerClassName="text-xs leading-snug text-muted-foreground/85"
       containerProps={{ 'data-slot': 'aui_reasoning-text' } as ComponentProps<'div'>}
+      disableArtifacts
       isRunning={status.type === 'running' || messageRunning}
-      scratchpad
       text={separateGluedReasoningBlocks(text.trimStart())}
-      textDirection={textDirection}
     />
   )
 }

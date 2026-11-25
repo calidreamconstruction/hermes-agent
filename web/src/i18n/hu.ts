@@ -95,7 +95,6 @@ export const hu: Translations = {
   status: {
     actionFailed: "Művelet sikertelen",
     actionFinished: "Befejezve",
-    actionFinishedOwed: "Frissítve, de még függőben (futtasd újra a `hermes update` parancsot a befejezéshez)",
     actions: "Műveletek",
     agent: "Ügynök",
     activeSessions: "Aktív munkamenetek",
@@ -163,14 +162,9 @@ export const hu: Translations = {
     deleteSelectedConfirmMessage:
       "Ez véglegesen eltávolítja a kijelölt {count} munkamenetet és minden üzenetüket. A művelet nem vonható vissza.",
     selectedSessionsDeleted: "{count} munkamenet törölve",
-    selectedSessionsSkippedActive: "{deleted} törölve; {count} megtartva, mert egy kör még fut",
     failedToDeleteSelected: "Nem sikerült törölni a kijelölt munkameneteket",
     resumeInChat: "Folytatás a csevegésben",
     newChat: "Új csevegés",
-    workspace: "munkaterület",
-    workspaceDefault: "Alapértelmezett",
-    workspaceRescan: "Tárolók újrakeresése",
-    workspaceCustom: "Másik útvonal…",
     previousPage: "Előző oldal",
     nextPage: "Következő oldal",
     roles: {
@@ -330,8 +324,6 @@ export const hu: Translations = {
     disableRuntime: "Letiltás",
     enableAfterInstall: "Engedélyezés a telepítés után",
     enableRuntime: "Engedélyezés",
-    toggleTakesEffectAfterRestart:
-      "Mentve — indítsa újra az átjárót a módosítás alkalmazásához.",
     forceReinstall: "Kényszerített újratelepítés (a meglévő mappa előbb törlődik)",
     headline:
       "Hermes-bővítmények felfedezése, telepítése, engedélyezése és frissítése (a `hermes plugins` paritás).",
@@ -477,8 +469,6 @@ export const hu: Translations = {
     copyCliCommand: "CLI-parancs másolása (külső / tartalék)",
     connect: "Csatlakozás",
     sessionExpires: "A munkamenet {time} múlva lejár",
-    sessionExpiredNoError:
-      "A bejelentkezés lejárt anélkül, hogy elérte volna a szolgáltatót. Ez általában azt jelenti, hogy a bejelentkezési oldal elakadt a megnyitott lapon (szerveroldali probléma) — fejezze be ott a bejelentkezést, majd kattintson az Újra gombra. Ha továbbra sem sikerül, használjon inkább API-kulcsot vagy a CLI-t.",
     initiatingLogin: "Bejelentkezési folyamat indítása…",
     exchangingCode: "Kód cseréje tokenekre…",
     connectedClosing: "Csatlakoztatva! Bezárás…",

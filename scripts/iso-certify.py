@@ -62,7 +62,6 @@ except Exception as exc:  # pragma: no cover - dependency guard
     raise
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))
 _READY_RE = re.compile(r"HERMES_(?:DASHBOARD|BACKEND)_READY port=(\d+)")
 _STALL_LOG_RE = re.compile(r"event loop stalled|ws write slow \(loop stalled")
 
@@ -117,11 +116,11 @@ def seed_scratch_home(home: Path, *, isolation: str, heartbeat_secs: int, respaw
             "compute_host_heartbeat_secs": heartbeat_secs,
             "compute_host_respawn_max": respawn_max,
         },
-        # Keep memory/skills side-machinery from reaching out.
+        # Keep memory/mem0/skills side-machinery from reaching out.
         "memory": {"enabled": False},
     }
     # config.yaml is the canonical config; write it directly.
-    import hermes_yaml as yaml
+    import yaml  # provided by the runtime venv
 
     (home / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=True), encoding="utf-8")
     # A stub .env so credential resolution doesn't spelunk the real home.
@@ -163,7 +162,7 @@ class ScratchDashboard:
                 self.actual_port = int(m.group(1))
                 self._ready.set()
 
-    def __enter__(self) -> ScratchDashboard:
+    def __enter__(self) -> "ScratchDashboard":
         venv_py = REPO_ROOT / "venv" / "bin" / "python"
         python = str(venv_py) if venv_py.exists() else sys.executable
         env = dict(os.environ)

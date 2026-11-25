@@ -16,11 +16,21 @@ import logging
 
 import pytest
 
-from tools.mcp_tool import MCPServerTask
+from tools.mcp_tool import MCPServerTask, _jittered
 
 
 # ── Jitter ───────────────────────────────────────────────────────────────────
 
+class TestJitter:
+    def test_jitter_within_20_percent(self):
+        for _ in range(200):
+            v = _jittered(10.0)
+            assert 8.0 <= v <= 12.0
+
+
+    def test_jitter_varies(self):
+        values = {_jittered(10.0) for _ in range(50)}
+        assert len(values) > 1, "jitter produced constant values"
 
 
 # ── Log levels: retry chatter DEBUG, transitions WARNING ─────────────────────
@@ -58,7 +68,6 @@ def test_retry_attempts_log_debug_transitions_warn(monkeypatch, tmp_path, caplog
                 if state["transport_calls"] == 1:
                     self.session = object()
                     self._ready.set()
-                    self._ever_connected = True
                     self.session = None
                 raise ConnectionError("backend down")
 
@@ -78,7 +87,7 @@ def test_retry_attempts_log_debug_transitions_warn(monkeypatch, tmp_path, caplog
         task._reconnect_event.set()
         try:
             await asyncio.wait_for(run_task, timeout=15)
-        except (TimeoutError, asyncio.CancelledError, Exception):
+        except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
             run_task.cancel()
 
     asyncio.run(_scenario())
@@ -99,6 +108,7 @@ def test_retry_attempts_log_debug_transitions_warn(monkeypatch, tmp_path, caplog
     assert len(park_warnings) == 1, (
         f"expected exactly 1 degraded→parked WARNING, got {len(park_warnings)}"
     )
+    assert "degraded → parked" in park_warnings[0].getMessage()
 
 
 @pytest.mark.no_isolate
@@ -145,7 +155,7 @@ def test_initial_retry_attempts_log_debug(monkeypatch, tmp_path, caplog):
         task._reconnect_event.set()
         try:
             await asyncio.wait_for(run_task, timeout=15)
-        except (TimeoutError, asyncio.CancelledError, Exception):
+        except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
             run_task.cancel()
 
     asyncio.run(_scenario())

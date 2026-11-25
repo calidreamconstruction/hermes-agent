@@ -5,10 +5,6 @@
  *  case. Compare through these rather than `===` / `startsWith`.
  */
 
-/** Windows drive (`C:\\`, `C:/`) or UNC (`\\\\server\\share`) absolute path.
- *  Such a path never gets joined onto a cwd. */
-export const isWindowsAbsolutePath = (path: string): boolean => /^(?:[A-Za-z]:[\\/]|\\\\)/.test(path)
-
 /** POSIX-style spelling: one separator, no trailing slash. */
 export const cleanPath = (path: string): string => path.trim().replace(/\\/g, '/').replace(/\/+$/, '') || '/'
 

@@ -91,33 +91,6 @@ def _registration_body(**overrides):
     return payload
 
 
-async def _wait_for_controller(ws, nonce: str) -> None:
-    """Complete a protocol round trip before dispatching through the broker."""
-    await ws.send_json(
-        {
-            "method": "browser.controller.heartbeat",
-            "params": {"nonce": nonce},
-        }
-    )
-    assert await ws.receive_json() == {
-        "method": "browser.controller.heartbeat",
-        "params": {"nonce": nonce, "ok": True},
-    }
-
-
-async def _receive_command(ws, pending: asyncio.Task) -> dict:
-    """Wait for either the controller frame or an early dispatch failure."""
-    receive = asyncio.create_task(ws.receive_json())
-    done, _ = await asyncio.wait((receive, pending), return_when=asyncio.FIRST_COMPLETED)
-    if receive in done:
-        return receive.result()
-    receive.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await receive
-    await pending
-    raise AssertionError("dispatch completed without sending a controller command")
-
-
 @pytest.mark.asyncio
 async def test_registration_grants_only_the_exact_real_action_allowlist(monkeypatch):
     adapter = _adapter()
@@ -199,6 +172,7 @@ def test_ws_sender_treats_wait_timeout_as_in_flight_and_real_error_as_failure(mo
         def result(self, timeout=None):
             if self.error is not None:
                 raise self.error
+            return None
 
         def add_done_callback(self, callback):
             self.callbacks.append(callback)
@@ -430,7 +404,17 @@ async def test_local_api_ticket_ws_noop_round_trip_filters_spoofed_identity_and_
             "/v1/browser-control/ws",
             protocols=[CONTROL_PROTOCOL, _ticket_protocol(registration["ticket"])],
         )
-        await _wait_for_controller(ws, "heartbeat-api-fixture")
+        await ws.send_json(
+            {
+                "method": "browser.controller.heartbeat",
+                "params": {"nonce": "heartbeat-api-fixture"},
+            }
+        )
+        heartbeat = await ws.receive_json(timeout=2.0)
+        assert heartbeat == {
+            "method": "browser.controller.heartbeat",
+            "params": {"nonce": "heartbeat-api-fixture", "ok": True},
+        }
         scope = ControllerScope(
             principal_id=registration["scope"]["principal_id"],
             profile_id=registration["scope"]["profile_id"],
@@ -450,7 +434,7 @@ async def test_local_api_ticket_ws_noop_round_trip_filters_spoofed_identity_and_
                 tool_call_id="tool-call-fixture",
             )
         )
-        command = await _receive_command(ws, pending)
+        command = await ws.receive_json(timeout=2.0)
         assert command["method"] == "browser.controller.command"
         assert command["params"]["action"] == "controller.noop"
         await ws.send_json(
@@ -463,7 +447,7 @@ async def test_local_api_ticket_ws_noop_round_trip_filters_spoofed_identity_and_
                 },
             }
         )
-        assert await pending == {"echo": "local-api"}
+        assert await asyncio.wait_for(pending, timeout=2.0) == {"echo": "local-api"}
 
         rejected = asyncio.create_task(
             asyncio.to_thread(
@@ -474,7 +458,7 @@ async def test_local_api_ticket_ws_noop_round_trip_filters_spoofed_identity_and_
                 tool_call_id="tool-call-rejected",
             )
         )
-        rejected_command = await _receive_command(ws, rejected)
+        rejected_command = await ws.receive_json(timeout=2.0)
         await ws.send_json(
             {
                 "method": "browser.controller.result",
@@ -486,7 +470,7 @@ async def test_local_api_ticket_ws_noop_round_trip_filters_spoofed_identity_and_
             }
         )
         with pytest.raises(ControllerRejected, match="controller_rejected"):
-            await rejected
+            await asyncio.wait_for(rejected, timeout=2.0)
         await ws.close()
 
         with pytest.raises(WSServerHandshakeError) as replay:
@@ -513,7 +497,6 @@ async def test_real_browser_action_routes_through_controller_without_legacy_fall
             "/v1/browser-control/ws",
             protocols=[CONTROL_PROTOCOL, _ticket_protocol(registration["ticket"])],
         )
-        await _wait_for_controller(ws, "real-action-ready")
 
         legacy_calls = []
         pending = asyncio.create_task(
@@ -530,7 +513,7 @@ async def test_real_browser_action_routes_through_controller_without_legacy_fall
                 tool_call_id="tool-call-real-action",
             )
         )
-        command = await _receive_command(ws, pending)
+        command = await ws.receive_json(timeout=2.0)
         assert command["method"] == "browser.controller.command"
         assert command["params"]["action"] == "browser_snapshot"
         assert command["params"]["arguments"] == {"include": "accessibility"}
@@ -549,7 +532,7 @@ async def test_real_browser_action_routes_through_controller_without_legacy_fall
             }
         )
 
-        assert await pending == (
+        assert await asyncio.wait_for(pending, timeout=2.0) == (
             '{"title": "Example Domain", "url": "https://example.test/", "refs": []}'
         )
         assert legacy_calls == []
@@ -571,7 +554,6 @@ async def test_local_api_same_identity_reconnect_completes_command_started_on_ol
             "/v1/browser-control/ws",
             protocols=[CONTROL_PROTOCOL, _ticket_protocol(first["ticket"])],
         )
-        await _wait_for_controller(first_ws, "first-reconnect-generation-ready")
 
         pending = asyncio.create_task(
             asyncio.to_thread(
@@ -587,7 +569,7 @@ async def test_local_api_same_identity_reconnect_completes_command_started_on_ol
                 tool_call_id="tool-call-reconnect",
             )
         )
-        command = await _receive_command(first_ws, pending)
+        command = await first_ws.receive_json(timeout=2.0)
         await first_ws.close()
         await asyncio.sleep(0)
         assert not pending.done()
@@ -602,7 +584,6 @@ async def test_local_api_same_identity_reconnect_completes_command_started_on_ol
             "/v1/browser-control/ws",
             protocols=[CONTROL_PROTOCOL, _ticket_protocol(second["ticket"])],
         )
-        await _wait_for_controller(second_ws, "second-reconnect-generation-ready")
         await second_ws.send_json(
             {
                 "method": "browser.controller.result",
@@ -613,7 +594,7 @@ async def test_local_api_same_identity_reconnect_completes_command_started_on_ol
                 },
             }
         )
-        assert await pending == '{"reconnected": true}'
+        assert await asyncio.wait_for(pending, timeout=2.0) == '{"reconnected": true}'
         await second_ws.close()
 
 
@@ -632,7 +613,6 @@ async def test_local_api_explicit_detach_is_hard_and_stale_socket_cannot_detach_
             "/v1/browser-control/ws",
             protocols=[CONTROL_PROTOCOL, _ticket_protocol(first["ticket"])],
         )
-        await _wait_for_controller(first_ws, "stale-detach-generation-ready")
         second_response = await client.post(
             "/v1/browser-control/register",
             json=_registration_body(capabilities=["controller.noop"]),
@@ -643,11 +623,12 @@ async def test_local_api_explicit_detach_is_hard_and_stale_socket_cannot_detach_
             "/v1/browser-control/ws",
             protocols=[CONTROL_PROTOCOL, _ticket_protocol(second["ticket"])],
         )
-        await _wait_for_controller(second_ws, "detach-generation-ready")
 
         await first_ws.send_json(
             {"method": "browser.controller.detach", "params": {}}
         )
+        with pytest.raises(asyncio.TimeoutError):
+            await first_ws.receive_json(timeout=0.05)
 
         pending = asyncio.create_task(
             asyncio.to_thread(
@@ -665,17 +646,17 @@ async def test_local_api_explicit_detach_is_hard_and_stale_socket_cannot_detach_
                 tool_call_id="tool-call-explicit-detach",
             )
         )
-        command = await _receive_command(second_ws, pending)
+        command = await second_ws.receive_json(timeout=2.0)
         await second_ws.send_json(
             {"method": "browser.controller.detach", "params": {}}
         )
-        detached = await second_ws.receive_json()
+        detached = await second_ws.receive_json(timeout=2.0)
         assert detached == {
             "method": "browser.controller.detach",
             "params": {"ok": True},
         }
         with pytest.raises(ControllerCancelled):
-            await pending
+            await asyncio.wait_for(pending, timeout=2.0)
         assert command["method"] == "browser.controller.command"
         await first_ws.close()
         await second_ws.close()
@@ -704,7 +685,6 @@ async def test_remote_api_uses_the_same_authenticated_noop_round_trip(monkeypatc
             "/v1/browser-control/ws",
             protocols=[CONTROL_PROTOCOL, _ticket_protocol(registration["ticket"])],
         )
-        await _wait_for_controller(ws, "remote-ready")
         scope = ControllerScope(
             principal_id=registration["scope"]["principal_id"],
             profile_id=registration["scope"]["profile_id"],
@@ -723,7 +703,7 @@ async def test_remote_api_uses_the_same_authenticated_noop_round_trip(monkeypatc
                 tool_call_id="tool-call-remote",
             )
         )
-        command = await _receive_command(ws, pending)
+        command = await ws.receive_json(timeout=2.0)
         await ws.send_json(
             {
                 "method": "browser.controller.result",
@@ -734,5 +714,7 @@ async def test_remote_api_uses_the_same_authenticated_noop_round_trip(monkeypatc
                 },
             }
         )
-        assert await pending == {"family": "remote-api"}
+        assert await asyncio.wait_for(pending, timeout=2.0) == {
+            "family": "remote-api"
+        }
         await ws.close()
