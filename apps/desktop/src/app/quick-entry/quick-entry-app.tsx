@@ -1,23 +1,13 @@
 import { useEffect, useReducer, useRef } from 'react'
 
-import { isSubmitEnter } from '@/lib/ime'
 import {
   initialQuickComposerState,
   QUICK_TARGET_CURRENT,
   QUICK_TARGET_NEW,
   type QuickComposerEvent,
   quickComposerReducer,
-  type QuickComposerState,
-  quickEntryResultEvent
+  type QuickComposerState
 } from '@/store/quick-entry'
-
-// Native select popups do not reliably inherit the closed control's colors.
-// Paint both sides of the contrast pair on every option so Chromium cannot
-// combine a dark-theme foreground with an OS-provided light popup surface.
-const QUICK_TARGET_OPTION_STYLE = {
-  backgroundColor: 'var(--ui-bg-elevated, var(--background))',
-  color: 'var(--ui-text-primary, var(--foreground))'
-}
 
 /**
  * The Quick Entry composer — the whole renderer surface of the global-hotkey
@@ -37,7 +27,6 @@ const QUICK_TARGET_OPTION_STYLE = {
  */
 export function QuickEntryApp() {
   const inputRef = useRef<HTMLInputElement>(null)
-  const submitIdRef = useRef(0)
 
   // The reducer returns { send, state }; this wrapper performs the side effect
   // (hand the payload to the shell, ask to hide) and stores the next state, so
@@ -47,14 +36,7 @@ export function QuickEntryApp() {
     const api = window.hermesDesktop?.quickEntry
 
     if (send) {
-      const submitId = submitIdRef.current
-      void api?.submit(send).then(result => {
-        dispatch(quickEntryResultEvent(result, submitId))
-
-        if (!result.ok) {
-          requestAnimationFrame(() => inputRef.current?.focus())
-        }
-      })
+      api?.submit(send)
     } else if (!next.visible && current.visible) {
       api?.dismiss()
     }
@@ -81,20 +63,11 @@ export function QuickEntryApp() {
       })
     })
 
-    const offLateResult = api?.onLateResult(payload => {
-      dispatch({
-        message: payload?.result?.message ?? 'Hermes could not deliver the prompt.',
-        ok: payload?.result?.ok === true,
-        type: 'late-result'
-      })
-    })
-
     inputRef.current?.focus()
 
     return () => {
       offShown?.()
       offState?.()
-      offLateResult?.()
     }
   }, [])
 
@@ -115,11 +88,7 @@ export function QuickEntryApp() {
           background: 'var(--ui-bg-elevated, var(--background))',
           border: '1px solid var(--ui-stroke-secondary, rgba(127,127,127,0.35))',
           borderRadius: 12,
-          // Shadow budget is capped by the 12px transparent padding around the
-          // card: extent (offset + blur) beyond 12px gets clipped by the fixed
-          // 640x168 window bounds, slicing the gradient into a hard edge.
-          // 2 + 8 = 10px stays inside the padding and fades out cleanly.
-          boxShadow: '0 2px 8px rgba(0,0,0,0.22)',
+          boxShadow: '0 18px 48px rgba(0,0,0,0.38)',
           display: 'flex',
           flexDirection: 'column',
           gap: 8,
@@ -154,9 +123,9 @@ export function QuickEntryApp() {
             }}
             onChange={event => dispatch({ draft: event.target.value, type: 'edit' })}
             onKeyDown={event => {
-              if (isSubmitEnter(event) && !event.shiftKey) {
+              if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
-                dispatch({ submitId: ++submitIdRef.current, type: 'submit' })
+                dispatch({ type: 'submit' })
               } else if (event.key === 'Escape') {
                 event.preventDefault()
                 dispatch({ type: 'dismiss' })
@@ -213,24 +182,15 @@ export function QuickEntryApp() {
             }}
             value={state.target}
           >
-            <option style={QUICK_TARGET_OPTION_STYLE} value={QUICK_TARGET_CURRENT}>
-              Current chat
-            </option>
-            <option style={QUICK_TARGET_OPTION_STYLE} value={QUICK_TARGET_NEW}>
-              New session
-            </option>
+            <option value={QUICK_TARGET_CURRENT}>Current chat</option>
+            <option value={QUICK_TARGET_NEW}>New session</option>
             {state.sessions.map(session => (
-              <option key={session.id} style={QUICK_TARGET_OPTION_STYLE} value={session.id}>
+              <option key={session.id} value={session.id}>
                 {session.title}
               </option>
             ))}
           </select>
         </div>
-        {state.error ? (
-          <div role="alert" style={{ color: 'var(--destructive, #ef4444)', fontSize: 11 }}>
-            {state.error}
-          </div>
-        ) : null}
       </div>
     </div>
   )

@@ -6,30 +6,20 @@ import { useGatewayRequest } from '@/app/gateway/hooks/use-gateway-request'
 import { $pluginRecords } from '@/contrib/plugins-store'
 import { getEnvVars, getHermesConfigSchema } from '@/hermes'
 import { useI18n } from '@/i18n'
-import { type IconComponent, Monitor, Package, Settings2, Wrench } from '@/lib/icons'
+import { Package, Palette, Settings2, Wrench } from '@/lib/icons'
 import { $agentPlugins, isDesktopRelevantPlugin, loadAgentPlugins } from '@/store/agent-plugins'
 import { $gatewayState } from '@/store/session'
+import { TRANSLUCENCY_SUPPORTED } from '@/store/translucency'
 
 import { useHermesConfigRecord } from '../hooks/use-config-record'
 import { useOnProfileSwitch } from '../hooks/use-on-profile-switch'
 
-import { SECTIONS } from './constants'
-import { OTHER_SUBPAGES } from './other-subpages'
-import { settingSearchTargets } from './settings-manifest'
-import { buildConfigSearchEntries, buildCredentialSearchEntries, type SettingsSearchEntry } from './settings-search'
-import { settingsSubpages } from './subpages'
-import type { SettingsView } from './types'
-
-/** An installed plugin row, deep-linkable as `/capabilities?tab=plugins&plugin=<id>`. */
-export interface PluginSearchEntry {
-  context: string
-  description?: string
-  icon: IconComponent
-  id: string
-  keywords: string[]
-  label: string
-  plugin: string
-}
+import {
+  APPEARANCE_SETTING_IDS,
+  buildConfigSearchEntries,
+  buildCredentialSearchEntries,
+  type SettingsSearchEntry
+} from './settings-search'
 
 /**
  * The granular settings-search catalog (appearance controls, config fields,
@@ -81,26 +71,26 @@ export function useSettingsSearchCatalog(enabled: boolean) {
     }
   }, [enabled, gatewayState, requestGateway])
 
-  // Installed plugin rows (both halves) — they live on Capabilities → Plugins,
-  // so each entry carries the `?plugin=` row selector for that page.
-  const pluginEntries: PluginSearchEntry[] = [
+  const pluginContext = t.settings.nav.plugins
+
+  const pluginEntries: SettingsSearchEntry[] = [
     ...Object.values(desktopPluginRecords).map(record => ({
-      context: t.settings.plugins.title,
+      context: pluginContext,
       description: record.description,
-      icon: Monitor,
+      icon: Package,
       id: `plugin:desktop:${record.id}`,
-      keywords: ['plugin', 'extension', 'desktop', record.id],
+      keywords: ['plugin', 'extension', record.id],
       label: record.name,
-      plugin: record.id
+      target: { plugin: record.id, view: 'plugins' as const }
     })),
     ...agentPlugins.filter(isDesktopRelevantPlugin).map(row => ({
-      context: t.skills.plugins.agentTitle,
+      context: pluginContext,
       description: row.description || undefined,
       icon: Package,
       id: `plugin:agent:${row.key ?? row.name}`,
-      keywords: ['plugin', 'extension', 'agent', ...(row.key ? [row.key] : [])],
+      keywords: ['plugin', 'extension', ...(row.key ? [row.key] : [])],
       label: row.name,
-      plugin: row.key ?? row.name
+      target: { plugin: row.key ?? row.name, view: 'plugins' as const }
     }))
   ]
 
@@ -116,6 +106,89 @@ export function useSettingsSearchCatalog(enabled: boolean) {
           sections: t.settings.sections
         })
 
+  const appearanceContext = t.settings.sections.appearance
+  const appearance = t.settings.appearance
+
+  const appearanceEntries: SettingsSearchEntry[] = [
+    {
+      context: appearanceContext,
+      description: t.language.description,
+      icon: Palette,
+      id: `setting:${APPEARANCE_SETTING_IDS.language}`,
+      keywords: ['locale'],
+      label: t.language.label,
+      target: { setting: APPEARANCE_SETTING_IDS.language, view: 'config:appearance' }
+    },
+    {
+      context: appearanceContext,
+      description: appearance.themeDesc,
+      icon: Palette,
+      id: `setting:${APPEARANCE_SETTING_IDS.theme}`,
+      keywords: ['color mode', 'skin'],
+      label: appearance.themeTitle,
+      target: { setting: APPEARANCE_SETTING_IDS.theme, view: 'config:appearance' }
+    },
+    {
+      context: appearanceContext,
+      icon: Palette,
+      id: `setting:${APPEARANCE_SETTING_IDS.uiScale}`,
+      keywords: ['zoom', 'size'],
+      label: appearance.uiScaleTitle,
+      target: { setting: APPEARANCE_SETTING_IDS.uiScale, view: 'config:appearance' }
+    },
+    // Linux has no translucency row to land on, and a palette hit that scrolls
+    // to nothing is worse than no hit.
+    ...(TRANSLUCENCY_SUPPORTED
+      ? [
+          {
+            context: appearanceContext,
+            description: appearance.translucencyDesc,
+            icon: Palette,
+            id: `setting:${APPEARANCE_SETTING_IDS.translucency}`,
+            keywords: ['opacity', 'transparent'],
+            label: appearance.translucencyTitle,
+            target: { setting: APPEARANCE_SETTING_IDS.translucency, view: 'config:appearance' as const }
+          }
+        ]
+      : []),
+    {
+      context: appearanceContext,
+      description: appearance.backdropDesc,
+      icon: Palette,
+      id: `setting:${APPEARANCE_SETTING_IDS.backdrop}`,
+      keywords: ['background', 'blur'],
+      label: appearance.backdropTitle,
+      target: { setting: APPEARANCE_SETTING_IDS.backdrop, view: 'config:appearance' }
+    },
+    {
+      context: appearanceContext,
+      description: appearance.introSplashDesc,
+      icon: Palette,
+      id: `setting:${APPEARANCE_SETTING_IDS.introSplash}`,
+      keywords: ['splash', 'wordmark', 'empty chat', 'new chat'],
+      label: appearance.introSplashTitle,
+      target: { setting: APPEARANCE_SETTING_IDS.introSplash, view: 'config:appearance' }
+    },
+    {
+      context: appearanceContext,
+      description: appearance.toolViewDesc,
+      icon: Palette,
+      id: `setting:${APPEARANCE_SETTING_IDS.toolView}`,
+      keywords: ['tool display', 'technical'],
+      label: appearance.toolViewTitle,
+      target: { setting: APPEARANCE_SETTING_IDS.toolView, view: 'config:appearance' }
+    },
+    {
+      context: appearanceContext,
+      description: appearance.embedsDesc,
+      icon: Palette,
+      id: `setting:${APPEARANCE_SETTING_IDS.embeds}`,
+      keywords: ['external content', 'privacy'],
+      label: appearance.embedsTitle,
+      target: { setting: APPEARANCE_SETTING_IDS.embeds, view: 'config:appearance' }
+    }
+  ]
+
   const credentialEntries = buildCredentialSearchEntries(
     envVarsFetching || envVarsError ? null : envVars,
     {
@@ -125,58 +198,8 @@ export function useSettingsSearchCatalog(enabled: boolean) {
     { settings: Settings2, tools: Wrench }
   )
 
-  const pageLabels: Record<string, string> = t.settings.nav
-
-  // The pages that own rows: config sections and the standalone views.
-  const parents = [
-    ...SECTIONS.map(section => ({
-      view: `config:${section.id}` as SettingsView,
-      label: t.settings.sections[section.id] ?? section.label,
-      icon: section.icon
-    })),
-    ...Object.keys(OTHER_SUBPAGES).map(view => ({
-      view: view as SettingsView,
-      label: pageLabels[view],
-      icon: Settings2
-    }))
-  ]
-
-  const parentOf = (view: SettingsView) => parents.find(parent => parent.view === view)
-
-  // Every hand-built settings row, straight from the manifest that also
-  // routes and ids them — the palette cannot drift from the pages.
-  const settingEntries: SettingsSearchEntry[] = settingSearchTargets(t).map(({ id, view, ...entry }) => {
-    const parent = parentOf(view)
-
-    return {
-      ...entry,
-      context: parent?.label ?? view,
-      icon: parent?.icon ?? Settings2,
-      id: `setting:${id}`,
-      target: { setting: id, view }
-    }
-  })
-
-  // A page named after its one setting (Appearance › Theme) would show up as
-  // two identical rows; the setting wins because it lands on the row itself.
-  const settingLabels = new Set(settingEntries.map(entry => `${entry.context}\u0000${entry.label}`))
-
-  const subpageEntries: SettingsSearchEntry[] = parents
-    .flatMap(parent =>
-      settingsSubpages(parent.view).map(page => ({
-        context: parent.label,
-        icon: parent.icon,
-        id: `settings-page:${parent.view}:${page.id}`,
-        keywords: [parent.label, page.id],
-        label: t.settings.subpages[page.labelKey],
-        target: { view: parent.view, subpage: page.id }
-      }))
-    )
-    .filter(entry => !settingLabels.has(`${entry.context}\u0000${entry.label}`))
-
   return {
-    subpageEntries,
-    settingEntries,
+    appearanceEntries,
     configEntries,
     credentialEntries,
     pluginEntries

@@ -1,4 +1,3 @@
-import { QUESTION_CARD_TOOLS } from '@/lib/chat-messages'
 import { isSilentTool } from '@/lib/tool-render-class'
 
 /**
@@ -12,22 +11,11 @@ import { isSilentTool } from '@/lib/tool-render-class'
 export const TURN_QUIET_S = 2
 
 export interface ActivityPart {
-  completedAt?: number
   result?: unknown
   text?: unknown
   toolName?: string
   type: string
 }
-
-// A sealed call carries a completion marker and no result.
-const settled = (part: ActivityPart): boolean => part.result !== undefined || part.completedAt !== undefined
-
-// A question card is the user's move, not the agent's. Open, the user is
-// answering it; answered, it narrates nothing, and its result landing is the
-// user's answer coming back rather than the agent producing something. The
-// indicator times that hand-back itself.
-const isQuestionCard = (part: ActivityPart): boolean =>
-  part.type === 'tool-call' && QUESTION_CARD_TOOLS.has(part.toolName ?? '')
 
 /**
  * What the tail message has produced so far, as a value that changes exactly
@@ -39,30 +27,21 @@ const isQuestionCard = (part: ActivityPart): boolean =>
  * signature without it reads a finished tool call as more of the same silence
  * and dates the gap after it from whenever the call started.
  */
-export function activitySignature(content: readonly ActivityPart[], reasoningShown = true): string {
-  let parts = 0
+export function activitySignature(content: readonly ActivityPart[]): string {
   let textLength = 0
   let settledTools = 0
 
   for (const part of content) {
-    // Reasoning the transcript does not draw (the guided chat, or the user
-    // turned it off) is the model thinking in silence, not progress on screen.
-    if (!reasoningShown && part.type === 'reasoning') {
-      continue
-    }
-
-    parts += 1
-
     if (typeof part.text === 'string') {
       textLength += part.text.length
     }
 
-    if (part.type === 'tool-call' && settled(part) && !isQuestionCard(part)) {
+    if (part.type === 'tool-call' && part.result !== undefined) {
       settledTools += 1
     }
   }
 
-  return `${parts}:${textLength}:${settledTools}`
+  return `${content.length}:${textLength}:${settledTools}`
 }
 
 /**
@@ -76,6 +55,6 @@ export function activitySignature(content: readonly ActivityPart[], reasoningSho
  */
 export function toolNarratesWait(content: readonly ActivityPart[]): boolean {
   return content.some(
-    part => part.type === 'tool-call' && !settled(part) && !isSilentTool(part.toolName ?? '') && !isQuestionCard(part)
+    part => part.type === 'tool-call' && part.result === undefined && !isSilentTool(part.toolName ?? '')
   )
 }

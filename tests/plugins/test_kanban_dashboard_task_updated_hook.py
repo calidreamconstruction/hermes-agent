@@ -18,7 +18,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from hermes_cli import kanban_db as kb
-from hermes_cli import kanban_db_connect as kbc
 from hermes_cli.plugins import get_plugin_manager
 
 
@@ -68,7 +67,7 @@ def captured_updates():
 
 
 def _make_task(title="t"):
-    conn = kbc.connect()
+    conn = kb.connect()
     try:
         return kb.create_task(conn, title=title, assignee="alice")
     finally:
@@ -85,8 +84,6 @@ def test_patch_priority_fires_task_updated(client, captured_updates):
     assert kw["task_id"] == tid
     assert kw["changed_fields"] == ["priority"]
     assert kw["board"]
-
-
 
 def test_bulk_priority_fires_task_updated_per_task(client, captured_updates):
     tid1 = _make_task("a")

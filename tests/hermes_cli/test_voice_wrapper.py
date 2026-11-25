@@ -15,6 +15,18 @@ import json
 import pytest
 
 
+class TestPublicAPI:
+    def test_gateway_symbols_importable(self):
+        """Match the exact import shape tui_gateway/server.py uses."""
+        from hermes_cli.voice import (
+            speak_text,
+            start_recording,
+            stop_and_transcribe,
+        )
+
+        assert callable(start_recording)
+        assert callable(stop_and_transcribe)
+        assert callable(speak_text)
 
 
 class TestNormalizeVoiceRecordKeyForPromptToolkit:
@@ -143,7 +155,7 @@ class TestFormatVoiceRecordKeyForStatus:
 class TestStopWithoutStart:
     def test_returns_none_when_no_recording_active(self, monkeypatch):
         """Idempotent no-op: stop before start must not raise or touch state."""
-        from hermes_cli import voice
+        import hermes_cli.voice as voice
 
         monkeypatch.setattr(voice, "_recorder", None)
 
@@ -163,7 +175,7 @@ class TestSpeakTextGuards:
         assert speak_text(text) is None
 
     def test_speak_text_uses_returned_tts_file_path(self, monkeypatch):
-        from hermes_cli import voice
+        import hermes_cli.voice as voice
         from tools import tts_tool
 
         played = []
@@ -184,7 +196,7 @@ class TestSpeakTextGuards:
         assert played == [returned_path]
 
     def test_speak_text_plays_returned_file_paths(self, monkeypatch):
-        from hermes_cli import voice
+        import hermes_cli.voice as voice
         from tools import tts_tool
 
         played = []
@@ -221,7 +233,7 @@ class TestContinuousAPI:
     def test_stop_continuous_idempotent_when_inactive(self, monkeypatch):
         """stop_continuous must not raise when no loop is active — the
         gateway's voice.toggle off path calls it unconditionally."""
-        from hermes_cli import voice
+        import hermes_cli.voice as voice
 
         monkeypatch.setattr(voice, "_continuous_active", False)
         monkeypatch.setattr(voice, "_continuous_recorder", None)
@@ -234,7 +246,7 @@ class TestContinuousAPI:
         """A second start_continuous while already active is a no-op — prevents
         two overlapping capture threads fighting over the microphone when the
         UI double-fires (e.g. both /voice on and Ctrl+B within the same tick)."""
-        from hermes_cli import voice
+        import hermes_cli.voice as voice
 
         monkeypatch.setattr(voice, "_continuous_active", True)
         called = {"n": 0}
@@ -266,13 +278,15 @@ class TestContinuousLoopSimulation:
 
     @pytest.fixture
     def fake_recorder(self, monkeypatch):
-        from hermes_cli import voice
+        import hermes_cli.voice as voice
 
         # Reset module state between tests.
         monkeypatch.setattr(voice, "_continuous_active", False)
         monkeypatch.setattr(voice, "_continuous_recorder", None)
         monkeypatch.setattr(voice, "_continuous_no_speech_count", 0)
-        monkeypatch.setattr(voice, "_continuous_callbacks", voice._NO_CALLBACKS)
+        monkeypatch.setattr(voice, "_continuous_on_transcript", None)
+        monkeypatch.setattr(voice, "_continuous_on_status", None)
+        monkeypatch.setattr(voice, "_continuous_on_silent_limit", None)
         monkeypatch.setattr(voice, "_continuous_auto_restart", True, raising=False)
         monkeypatch.setattr(voice, "_voice_busy_probe", None, raising=False)
         monkeypatch.setattr(voice, "_play_beep", lambda *_, **__: None)
@@ -318,7 +332,7 @@ class TestContinuousLoopSimulation:
         return rec
 
     def test_loop_auto_restarts_after_transcript(self, fake_recorder, monkeypatch):
-        from hermes_cli import voice
+        import hermes_cli.voice as voice
 
         monkeypatch.setattr(
             voice,
@@ -355,7 +369,7 @@ class TestContinuousLoopSimulation:
 
 
     def test_silent_limit_halts_loop_after_three_strikes(self, fake_recorder, monkeypatch):
-        from hermes_cli import voice
+        import hermes_cli.voice as voice
 
         # Transcription returns no speech — fake_recorder.stop() returns the
         # path, but transcribe returns empty text, counting as silence.
@@ -386,7 +400,7 @@ class TestContinuousLoopSimulation:
 
     def test_silent_cycles_do_not_count_while_tts_playing(self, fake_recorder, monkeypatch):
         """TTS speaking: the user is listening, not ignoring the mic."""
-        from hermes_cli import voice
+        import hermes_cli.voice as voice
 
         monkeypatch.setattr(
             voice,
@@ -429,7 +443,7 @@ class TestBeepsEnabledTruthyStrings:
     bool("false") is True, so the gate must use utils.is_truthy_value (#49883)."""
 
     def _enabled_with(self, monkeypatch, value):
-        from hermes_cli import voice
+        import hermes_cli.voice as voice
 
         monkeypatch.setattr(
             "hermes_cli.config.load_config",
@@ -453,9 +467,9 @@ class TestSpeakTextStreamingDispatch:
     parallel streaming implementations."""
 
     def test_streaming_provider_routes_through_dispatcher(self, monkeypatch):
-        from hermes_cli import voice
+        import hermes_cli.voice as voice
         import tools.tts_streaming as ts
-        from tools import tts_tool, tts_tool_speaker
+        from tools import tts_tool
 
         streamed = []
 
@@ -470,7 +484,7 @@ class TestSpeakTextStreamingDispatch:
         monkeypatch.setattr(
             ts, "resolve_streaming_provider", lambda cfg, preferred=None: object()
         )
-        monkeypatch.setattr(tts_tool_speaker, "stream_tts_to_speaker", fake_stream)
+        monkeypatch.setattr(tts_tool, "stream_tts_to_speaker", fake_stream)
 
         synced = []
         monkeypatch.setattr(

@@ -13,8 +13,6 @@ import {
   HUD_SURFACE,
   HUD_TEXT
 } from '@/app/floating-hud'
-import { SESSION_IMPORT_ROUTE } from '@/app/routes'
-import { leaveIntro } from '@/components/onboarding-chat/intro'
 import { codiconIcon } from '@/components/ui/codicon'
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { HighlightMatches } from '@/components/ui/highlight-matches'
@@ -47,7 +45,6 @@ import {
   Package,
   Palette,
   PawPrint,
-  Pin,
   Plus,
   RefreshCw,
   Settings,
@@ -59,9 +56,7 @@ import {
   Wrench,
   Zap
 } from '@/lib/icons'
-import { getServers } from '@/lib/mcp-servers'
 import { normalize } from '@/lib/text'
-import { rollbackSentence } from '@/lib/update-copy'
 import { cn } from '@/lib/utils'
 import { resolveVersionStatus } from '@/lib/version-status'
 import { $repoWorktrees } from '@/store/coding-status'
@@ -72,15 +67,12 @@ import {
   closeCommandPalette,
   setCommandPaletteOpen
 } from '@/store/command-palette'
-import { completeFlow, recordAction } from '@/store/desktop-metrics'
 import { $bindings, bindingsFor } from '@/store/keybinds'
-import { $dismissedAutoProjectIds, $pinnedSessionIds, filterVisibleProjects } from '@/store/layout'
+import { $dismissedAutoProjectIds, filterVisibleProjects } from '@/store/layout'
 import { openPetGenerate } from '@/store/pet-generate'
-import { toggleBrowserTab } from '@/store/preview'
+import { openBrowserTab } from '@/store/preview'
 import { $projectTree, goToProject, openFolderAsProject, requestStartWorkSession } from '@/store/projects'
-import { $connection, $cronSessions, $messagingSessions, $sessions } from '@/store/session'
-import { $unconfirmedPinWrites } from '@/store/session-pin-sync'
-import { $removedSessionIds } from '@/store/session-removal'
+import { $connection } from '@/store/session'
 import { runGatewayRestart } from '@/store/system-actions'
 import {
   $backendUpdateApply,
@@ -95,12 +87,10 @@ import { luminance } from '@/themes/color'
 import { type ThemeMode, useTheme } from '@/themes/context'
 import { isUserTheme, resolveTheme } from '@/themes/user-themes'
 
-import { buildSessionByAnyId, resolvePinnedSessions } from '../chat/sidebar/session-index'
-import { openSessionFromPicker, openSessionIntentFromModifiers } from '../open-session'
+import { openSession, openSessionIntentFromModifiers } from '../open-session'
 import {
   AGENTS_ROUTE,
   ARTIFACTS_ROUTE,
-  CAPABILITIES_ROUTE,
   COMMAND_CENTER_ROUTE,
   CRON_ROUTE,
   MESSAGING_ROUTE,
@@ -108,6 +98,7 @@ import {
   NEW_CHAT_ROUTE,
   PROFILES_ROUTE,
   SETTINGS_ROUTE,
+  SKILLS_ROUTE,
   STARMAP_ROUTE
 } from '../routes'
 import { SECTIONS } from '../settings/constants'
@@ -400,11 +391,6 @@ const toSessionEntry = (session: SessionRow): SessionEntry => ({
   title: sessionTitle(session)
 })
 
-// Search terms beyond the label: the preview and branch, so a session is
-// findable by what it's about, not only what it's called.
-const sessionKeywords = (session: SessionEntry, ...tags: string[]): string[] =>
-  [...tags, 'chat', 'session', session.preview, session.git_branch].filter((word): word is string => !!word)
-
 type NonConfigSettingsLabel =
   | 'about'
   | 'archivedChats'
@@ -464,13 +450,13 @@ const NON_CONFIG_SETTINGS: ReadonlyArray<{
     labelKey: 'keysSettings',
     tab: 'keys&kview=settings'
   },
-  { icon: Archive, keywords: ['history', 'archived'], labelKey: 'archivedChats', tab: 'sessions' },
   {
-    icon: codiconIcon('extensions'),
-    keywords: ['plugins', 'plugin settings', 'plugin options', 'addons', 'add-ons', 'extensions'],
+    icon: Package,
+    keywords: ['plugins', 'extensions', 'desktop plugins', 'addon', 'add-on'],
     labelKey: 'plugins',
     tab: 'plugins'
   },
+  { icon: Archive, keywords: ['history', 'archived'], labelKey: 'archivedChats', tab: 'sessions' },
   { icon: Info, keywords: ['version', 'about'], labelKey: 'about', tab: 'about' }
 ]
 
@@ -607,11 +593,8 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
     return resolveVersionStatus({
       applying: apply.applying || apply.stage === 'restart',
       behind: status?.behind ?? 0,
-      channel: status?.channel === 'stable' ? 'stable' : 'main',
       copy: t.shell.statusbar,
-      latestTag: status?.latestTag,
       remote: backend,
-      rollback: rollbackSentence(status, t.settings.about.channel.rollbackBody),
       restarting: apply.stage === 'restart',
       sha: status?.currentSha?.slice(0, 7) ?? null,
       target: backend ? 'backend' : 'client',
@@ -666,65 +649,25 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
     queryFn: () => getHermesConfigRecord()
   })
 
-  // staleTime 0 (not the 60s client default): renames, pins, and archives
-  // happen in the sidebar while this component is unmounted, so nothing can
-  // invalidate these keys — every open must revalidate. The cached page
-  // still paints instantly; the live-store overlay below covers the gap.
   const sessionsQuery = useQuery({
     queryKey: ['command-palette', 'sessions'],
-    queryFn: () => listAllProfileSessions(200, 1, 'exclude'),
-    staleTime: 0
+    queryFn: () => listAllProfileSessions(200, 1, 'exclude')
   })
 
   const archivedQuery = useQuery({
     queryKey: ['command-palette', 'archived'],
-    queryFn: () => listAllProfileSessions(200, 0, 'only'),
-    staleTime: 0
+    queryFn: () => listAllProfileSessions(200, 0, 'only')
   })
 
-  const liveSessions = useStore($sessions)
-  const liveCronSessions = useStore($cronSessions)
-  const liveMessagingSessions = useStore($messagingSessions)
-  const pinnedSessionIds = useStore($pinnedSessionIds)
-  const unconfirmedPinWrites = useStore($unconfirmedPinWrites)
-  const removedSessionIds = useStore($removedSessionIds)
+  const mcpServers = useMemo(() => {
+    const raw = configQuery.data?.mcp_servers
 
-  // getServers is the shared choke point that also drops malformed (null/
-  // scalar) entries, so the palette never lists a server the MCP tab dropped.
-  const mcpServers = useMemo(() => Object.keys(getServers(configQuery.data ?? null)).sort(), [configQuery.data])
+    return raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? Object.keys(raw as Record<string, unknown>).sort()
+      : []
+  }, [configQuery.data])
 
-  // The sidebar's stores are where a rename / pin / archive lands first (the
-  // server page confirms later). Overlay them on the fetched 200-row page so
-  // the palette says what the sidebar says: same title, same pin, and no row
-  // the user just archived or deleted.
-  const liveRows = useMemo(() => {
-    const byId = new Map(
-      [...liveCronSessions, ...liveMessagingSessions, ...liveSessions].map(row => [row.id, row] as const)
-    )
-
-    return (sessionsQuery.data?.sessions ?? [])
-      .filter(session => !removedSessionIds.has(session.id))
-      .map(session => {
-        const live = byId.get(session.id)
-
-        return live ? { ...session, pinned: live.pinned, title: live.title } : session
-      })
-  }, [liveCronSessions, liveMessagingSessions, liveSessions, removedSessionIds, sessionsQuery.data])
-
-  // Same resolution as the sidebar's Pinned section: local pin order first,
-  // then server-flagged pins, minus our own in-flight unpins.
-  const pinnedSessions = useMemo(() => {
-    const byAnyId = buildSessionByAnyId(liveRows, [], [])
-
-    return resolvePinnedSessions(pinnedSessionIds, byAnyId, liveRows, unconfirmedPinWrites).map(toSessionEntry)
-  }, [liveRows, pinnedSessionIds, unconfirmedPinWrites])
-
-  const sessions = useMemo(() => {
-    const pinned = new Set(pinnedSessions.map(session => session.id))
-
-    return liveRows.filter(session => !pinned.has(session.id)).map(toSessionEntry)
-  }, [liveRows, pinnedSessions])
-
+  const sessions = useMemo(() => (sessionsQuery.data?.sessions ?? []).map(toSessionEntry), [sessionsQuery.data])
   const archivedSessions = useMemo(() => (archivedQuery.data?.sessions ?? []).map(toSessionEntry), [archivedQuery.data])
 
   // Search/sub-page are local to a mount, and this component remounts per open
@@ -764,7 +707,7 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
   // sidebar, minus the sidebar's licence to spend main.
   const goSession = useCallback(
     (sessionId: string) => (event?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => {
-      openSessionFromPicker(sessionId, navigate, openSessionIntentFromModifiers(event, 'stack'))
+      openSession(sessionId, navigate, openSessionIntentFromModifiers(event, 'stack'))
     },
     [navigate]
   )
@@ -885,12 +828,12 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
             run: go(SETTINGS_ROUTE)
           },
           {
-            action: 'nav.capabilities',
+            action: 'nav.skills',
             icon: Wrench,
             id: 'nav-skills',
             keywords: ['skills', 'tools', 'toolsets', 'mcp', 'capabilities'],
-            label: cc.nav.capabilities.title,
-            run: go(CAPABILITIES_ROUTE)
+            label: cc.nav.skills.title,
+            run: go(SKILLS_ROUTE)
           },
           {
             action: 'nav.messaging',
@@ -959,13 +902,6 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
             run: go(`${COMMAND_CENTER_ROUTE}?section=sessions`)
           },
           {
-            icon: Download,
-            id: 'session-import',
-            keywords: ['import', 'claude', 'codex', 'conversation'],
-            label: t.sessionImport.action,
-            run: go(SESSION_IMPORT_ROUTE)
-          },
-          {
             icon: Activity,
             id: 'cc-system',
             keywords: ['command center', 'system', 'status', 'logs'],
@@ -1005,9 +941,9 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
             action: 'view.showBrowser',
             icon: codiconIcon('globe'),
             id: 'cc-open-browser',
-            keywords: ['browser', 'web', 'url', 'address', 'open', 'toggle', 'close', 'navigate', 'internet', 'site'],
-            label: cc.toggleBrowser,
-            run: () => toggleBrowserTab()
+            keywords: ['browser', 'web', 'url', 'address', 'open', 'navigate', 'internet', 'site'],
+            label: cc.openBrowser,
+            run: () => openBrowserTab()
           }
         ]
       },
@@ -1150,7 +1086,7 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
     // Deep-link straight to a Capabilities sub-tab. The root "Go to" entry only
     // lands on the top-level Skills view; typing "mcp"/"tools"/"skills" should
     // jump to the exact tab (matches the "not just the top lvl" ask).
-    const capLabel = t.commandCenter.nav.capabilities.title
+    const capLabel = t.commandCenter.nav.skills.title
 
     result.push({
       heading: capLabel,
@@ -1160,28 +1096,21 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
           id: 'cap-skills',
           keywords: ['skills', 'capabilities'],
           label: `${capLabel}: ${t.skills.tabSkills}`,
-          run: go(`${CAPABILITIES_ROUTE}?tab=skills`)
+          run: go(`${SKILLS_ROUTE}?tab=skills`)
         },
         {
           icon: SlidersHorizontal,
           id: 'cap-toolsets',
           keywords: ['tools', 'toolsets', 'capabilities'],
           label: `${capLabel}: ${t.skills.tabToolsets}`,
-          run: go(`${CAPABILITIES_ROUTE}?tab=toolsets`)
+          run: go(`${SKILLS_ROUTE}?tab=toolsets`)
         },
         {
           icon: Layers3,
-          id: 'cap-connectors',
-          keywords: ['connectors', 'apps', 'mcp', 'servers', 'tools', 'capabilities', 'model context protocol'],
-          label: `${capLabel}: ${t.connectorsPage.title}`,
-          run: go(`${CAPABILITIES_ROUTE}?tab=connectors`)
-        },
-        {
-          icon: Package,
-          id: 'cap-plugins',
-          keywords: ['plugins', 'extensions', 'desktop plugins', 'agent plugins', 'catalog', 'addon', 'add-on'],
-          label: `${capLabel}: ${t.skills.tabPlugins}`,
-          run: go(`${CAPABILITIES_ROUTE}?tab=plugins`)
+          id: 'cap-mcp',
+          keywords: ['mcp', 'servers', 'tools', 'capabilities', 'model context protocol'],
+          label: `${capLabel}: ${t.skills.tabMcp}`,
+          run: go(`${SKILLS_ROUTE}?tab=mcp`)
         }
       ]
     })
@@ -1235,39 +1164,25 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
       }))
     })
 
-    // Pinned before Sessions: rankGroups' stable sort keeps source order on
-    // equal scores, so a pin wins a tie with an unpinned row of the same name.
-    if (pinnedSessions.length > 0) {
-      result.push({
-        heading: t.sidebar.pinned,
-        items: pinnedSessions.map(session => ({
-          icon: Pin,
-          id: `pinned-${session.id}`,
-          keywords: sessionKeywords(session, 'pinned'),
-          label: session.title,
-          runWithEvent: goSession(session.id)
-        }))
-      })
-    }
-
     if (sessions.length > 0) {
       result.push({
         heading: t.commandCenter.sections.sessions,
         items: sessions.map(session => ({
           icon: MessageCircle,
           id: `session-${session.id}`,
-          keywords: sessionKeywords(session),
+          keywords: [
+            'chat',
+            'session',
+            ...(session.preview ? [session.preview] : []),
+            ...(session.git_branch ? [session.git_branch] : [])
+          ],
           label: session.title,
           runWithEvent: goSession(session.id)
         }))
       })
     }
 
-    const fieldItems = [
-      ...settingsCatalog.subpageEntries,
-      ...settingsCatalog.settingEntries,
-      ...settingsCatalog.configEntries
-    ].map(settingsEntryItem)
+    const fieldItems = [...settingsCatalog.appearanceEntries, ...settingsCatalog.configEntries].map(settingsEntryItem)
 
     if (fieldItems.length > 0) {
       result.push({ heading: t.commandCenter.settingsFields, items: fieldItems })
@@ -1275,15 +1190,8 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
 
     if (settingsCatalog.pluginEntries.length > 0) {
       result.push({
-        heading: t.skills.tabPlugins,
-        items: settingsCatalog.pluginEntries.map(entry => ({
-          detail: entry.context,
-          icon: entry.icon,
-          id: `sp-${entry.id}`,
-          keywords: [entry.context, entry.description ?? '', ...entry.keywords],
-          label: entry.label,
-          run: go(`${CAPABILITIES_ROUTE}?tab=plugins&plugin=${encodeURIComponent(entry.plugin)}`)
-        }))
+        heading: t.settings.nav.plugins,
+        items: settingsCatalog.pluginEntries.map(settingsEntryItem)
       })
     }
 
@@ -1302,7 +1210,7 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
           id: `mcp-${name}`,
           keywords: ['mcp', 'server', 'tool'],
           label: name,
-          run: go(`${CAPABILITIES_ROUTE}?tab=connectors&server=${encodeURIComponent(name)}`)
+          run: go(`${SKILLS_ROUTE}?tab=mcp&server=${encodeURIComponent(name)}`)
         }))
       })
     }
@@ -1313,7 +1221,13 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
         items: archivedSessions.map(session => ({
           icon: Archive,
           id: `archived-${session.id}`,
-          keywords: sessionKeywords(session, 'archived'),
+          keywords: [
+            'archived',
+            'chat',
+            'session',
+            ...(session.preview ? [session.preview] : []),
+            ...(session.git_branch ? [session.git_branch] : [])
+          ],
           label: session.title,
           run: go(`${SETTINGS_ROUTE}?tab=sessions&session=${encodeURIComponent(session.id)}`)
         }))
@@ -1328,7 +1242,6 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
     goSession,
     mcpServers,
     mode,
-    pinnedSessions,
     previewTheme,
     resolvedMode,
     resolveThemeMode,
@@ -1384,12 +1297,15 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
     if (search.trim()) {
       result.push({
         heading: cc.settingsFields,
-        items: [
-          ...settingsCatalog.subpageEntries,
-          ...settingsCatalog.settingEntries,
-          ...settingsCatalog.configEntries
-        ].map(settingsEntryItem)
+        items: [...settingsCatalog.appearanceEntries, ...settingsCatalog.configEntries].map(settingsEntryItem)
       })
+
+      if (settingsCatalog.pluginEntries.length > 0) {
+        result.push({
+          heading: t.settings.nav.plugins,
+          items: settingsCatalog.pluginEntries.map(settingsEntryItem)
+        })
+      }
 
       if (settingsCatalog.credentialEntries.length > 0) {
         result.push({
@@ -1584,11 +1500,6 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
 
       return
     }
-
-    completeFlow('command_palette')
-    recordAction(item.action ?? 'other', 'palette')
-    // A Cmd-K command or layout is a way out of the first-run intro.
-    leaveIntro()
 
     if (item.runWithEvent) {
       item.runWithEvent(lastSelectMods.current)

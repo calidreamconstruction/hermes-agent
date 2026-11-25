@@ -29,14 +29,13 @@ def _docker_available() -> bool:
     try:
         r = subprocess.run(
             ["docker", "info"], capture_output=True, timeout=5,
-            check=False,
         )
         return r.returncode == 0
     except (subprocess.TimeoutExpired, OSError):
         return False
 
 
-def pytest_collection_modifyitems(config, items):
+def pytest_collection_modifyitems(config, items):  # noqa: D401 - pytest hook
     """Apply docker-suite policy: timeout bump + skip on missing docker."""
     docker_ok = _docker_available()
     skip_docker = pytest.mark.skip(
@@ -64,7 +63,6 @@ def built_image() -> str:
     result = subprocess.run(
         ["docker", "build", "-t", IMAGE_TAG, repo_root],
         capture_output=True, text=True, timeout=1200,
-        check=False,
     )
     assert result.returncode == 0, (
         f"docker build failed:\n{result.stderr[-2000:]}"
@@ -81,7 +79,6 @@ def container_name(request) -> Iterator[str]:
     subprocess.run(
         ["docker", "rm", "-f", name],
         capture_output=True, timeout=10,
-        check=False,
     )
 
 
@@ -122,7 +119,6 @@ def docker_exec(
     cmd = ["docker", "exec", "-u", user, *extra_docker_args, container, *args]
     return subprocess.run(
         cmd, capture_output=True, text=True, timeout=timeout,
-        check=False,
     )
 
 
@@ -309,7 +305,6 @@ def wait_for_docker_logs(
         r = subprocess.run(
             ["docker", "logs", container],
             capture_output=True, text=True, timeout=10,
-            check=False,
         )
         last = r.stdout + r.stderr
         if needle in last:

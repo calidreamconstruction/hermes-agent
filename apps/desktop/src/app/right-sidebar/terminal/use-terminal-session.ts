@@ -7,33 +7,28 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 
 import { writeClipboardText } from '@/components/ui/copy-button'
+import { markRightPanePerf } from '@/debug/right-pane-events'
 import { triggerHaptic } from '@/lib/haptics'
-import { isComposerChord } from '@/lib/keybinds/chords'
 import { $previewTarget } from '@/store/preview'
 import { useTheme } from '@/themes/context'
 
 import { $terminalInjection } from '../store'
 
+import { observeActiveTerminalResize } from './active-resize'
 import { makeTerminalReader, registerTerminalReader } from './buffer'
 import { mirrorSelection, terminalClipboardIntent } from './clipboard'
 import { terminalLinkHandler, terminalWebLinksAddon } from './links'
 import {
+  isAddSelectionShortcut,
   isMacPlatform,
   resolveSurfaceColor,
-  shouldOwnAddSelectionShortcut,
   terminalSelectionAnchor,
   terminalSelectionLabel,
   terminalTheme
 } from './selection'
 import { registerTerminalContextMenu } from './terminal-context-menu'
 import { prepareTerminalFontFamily } from './terminal-font'
-import {
-  closeTerminal,
-  redrawAllTerminals,
-  registerWebglRefresh,
-  updateTerminalRestoreCwd,
-  updateTerminalReviveBuffer
-} from './terminals'
+import { closeTerminal, updateTerminalRestoreCwd, updateTerminalReviveBuffer } from './terminals'
 import { useTerminalFontController } from './use-terminal-font'
 
 // How many scrollback lines to serialize for relaunch restore. Mirrors VS Code's
@@ -421,6 +416,7 @@ export function useTerminalSession({
   // drag-and-drop paths, or an injected command). Gates idle-buffer handling in
   // persistSnapshot so an untouched tab never re-saves an accumulating snapshot.
   const hasSessionActivityRef = useRef(false)
+  const initialActiveRef = useRef(active)
   const shellNameRef = useRef('shell')
   const selectionLabelRef = useRef('')
   const selectionRef = useRef('')
@@ -428,7 +424,8 @@ export function useTerminalSession({
   const onShellRef = useRef(onShell)
   // Re-fit on activation: a tab hidden via display:none has a 0×0 host, so its
   // last fit is stale by the time it's shown again.
-  const fitRef = useRef<(() => void) | null>(null)
+  const fitRef = useRef<((visible: boolean) => void) | null>(null)
+  const initialActiveFitRef = useRef(false)
   const { latestFontFamilyRef, mountedRef } = useTerminalFontController({ fitRef, termRef, webglRef })
   const [status, setStatus] = useState<TerminalStatus>('starting')
   const [selection, setSelection] = useState('')
@@ -474,26 +471,12 @@ export function useTerminalSession({
     triggerHaptic('selection')
   }, [])
 
-  // Only the active tab owns the global ⌘/Ctrl+L listener. Every open tab
-  // stays mounted, so registering the capture handler on every session
-  // fired N identical add-selection calls for a single keypress (#76116).
-  // Still do not gate on React selection state — TUI redraw races can
-  // clear that while xterm / window still have live text.
-  // Only swallow ⌘/Ctrl+L when there's text to send; otherwise it must
-  // reach the shell as clear-screen.
+  // Always listen — gating on the React selection state misses selections the
+  // TUI redraw races. Only swallow ⌘/Ctrl+L when there's text to send, else it
+  // must reach the shell as clear-screen.
   useEffect(() => {
-    if (!active) {
-      return
-    }
-
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!isComposerChord(event)) {
-        return
-      }
-
-      const hasSelection = Boolean(readSelection().trim())
-
-      if (!shouldOwnAddSelectionShortcut(event, { active: true, hasSelection })) {
+      if (!isAddSelectionShortcut(event) || !readSelection().trim()) {
         return
       }
 
@@ -505,7 +488,7 @@ export function useTerminalSession({
     window.addEventListener('keydown', onKeyDown, { capture: true })
 
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
-  }, [active, addSelectionToChat, readSelection])
+  }, [addSelectionToChat, readSelection])
 
   // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
   useEffect(() => {
@@ -764,55 +747,27 @@ export function useTerminalSession({
       term.write(next)
     }
 
-    const fitAndResize = () => {
+    const fitAndResize = (visible: boolean) => {
       if (disposed || !host.isConnected || host.clientWidth <= 0 || host.clientHeight <= 0) {
         return
       }
 
       try {
         fit.fit()
+        markRightPanePerf(visible ? 'terminal-fit-active' : 'terminal-fit-hidden', id)
       } catch {
         return
       }
 
-      const id = sessionIdRef.current
+      const sessionId = sessionIdRef.current
 
-      if (id && (lastSentSize?.cols !== term.cols || lastSentSize?.rows !== term.rows)) {
+      if (sessionId && (lastSentSize?.cols !== term.cols || lastSentSize?.rows !== term.rows)) {
         lastSentSize = { cols: term.cols, rows: term.rows }
-        void terminalApi.resize(id, { cols: term.cols, rows: term.rows })
+        void terminalApi.resize(sessionId, { cols: term.cols, rows: term.rows })
       }
     }
 
     fitRef.current = fitAndResize
-
-    // Coalesce ResizeObserver bursts through rAF — running fit.fit()
-    // synchronously while sibling panes are mid-transition (e.g. file browser
-    // collapsing to 0px) crashes the WebGL renderer mid texture-atlas rebuild.
-    let pendingFrame = 0
-
-    const scheduleResize = () => {
-      if (pendingFrame) {
-        return
-      }
-
-      pendingFrame = window.requestAnimationFrame(() => {
-        pendingFrame = 0
-
-        if (!disposed) {
-          fitAndResize()
-        }
-      })
-    }
-
-    const resizeObserver = new ResizeObserver(scheduleResize)
-    resizeObserver.observe(host)
-    cleanup.push(() => {
-      resizeObserver.disconnect()
-
-      if (pendingFrame) {
-        window.cancelAnimationFrame(pendingFrame)
-      }
-    })
 
     const dataDisposable = term.onData(data => {
       hasSessionActivityRef.current = true
@@ -841,9 +796,7 @@ export function useTerminalSession({
 
     // The app context menu resolves right-clicks on this host through the
     // registered handle: xterm's selection is not a DOM selection, so the
-    // DOM resolver would see nothing here. The same handle answers the
-    // focus-routed Ctrl/Cmd+R: main claimed the keystroke, so re-deliver the
-    // ^R byte to the PTY ourselves (#96482).
+    // DOM resolver would see nothing here.
     cleanup.push(
       registerTerminalContextMenu(host, {
         getSelection: () => term.getSelection(),
@@ -852,30 +805,7 @@ export function useTerminalSession({
           term.focus()
           term.paste(text)
         },
-        reload: () => {
-          hasSessionActivityRef.current = true
-          const sessionId = sessionIdRef.current
-
-          if (sessionId) {
-            void terminalApi.write(sessionId, '\x12')
-          }
-        },
-        selectAll: () => term.selectAll(),
-        // The close-tab chord main claimed over this terminal is the shell's
-        // word erase: re-deliver the ^W byte instead of closing the pane
-        // (#65457). False when the session is gone, so the caller closes.
-        wordErase: () => {
-          hasSessionActivityRef.current = true
-          const sessionId = sessionIdRef.current
-
-          if (!sessionId) {
-            return false
-          }
-
-          void terminalApi.write(sessionId, '\x17')
-
-          return true
-        }
+        selectAll: () => term.selectAll()
       })
     )
 
@@ -924,7 +854,7 @@ export function useTerminalSession({
         // user last `cd`'d; the main side falls back to the launch cwd (then
         // home) if that dir no longer exists.
         .start({ cols: term.cols, cwd: initialRestoreCwdRef.current || cwd, rows: term.rows })
-        .then(async session => {
+        .then(session => {
           if (disposed) {
             void terminalApi.dispose(session.id)
 
@@ -941,6 +871,8 @@ export function useTerminalSession({
           selectionRef.current = initial
           selectionLabelRef.current = initial ? terminalSelectionLabel(term, shellNameRef.current, initial) : ''
 
+          setStatus('open')
+
           cleanup.push(
             terminalApi.onData(session.id, data => {
               armedWrite(data)
@@ -955,28 +887,13 @@ export function useTerminalSession({
               // false — running closeTerminal here would wipe the persisted tabs
               // right before relaunch restores them.
               if (!disposed && !appTearingDown) {
-                // Release the main-side session explicitly instead of relying
-                // on the unmount cleanup's timing — the exit→unmount hop is
-                // async, and a teardown in between would skip dispose and leak
-                // the PTY (#128942). The cleanup's later dispose is a no-op.
-                void terminalApi.dispose(session.id)
                 closeTerminal(id)
               }
             })
           )
 
-          const attached = await terminalApi.attach(session.id)
-
-          if (!attached) {
-            throw new Error('Terminal session disappeared before its output stream attached')
-          }
-
-          setStatus('open')
-
           window.requestAnimationFrame(() => {
-            fitAndResize()
             term.clearSelection() // drop any selection painted over transient boot rows
-            term.focus()
           })
         })
         .catch(error => {
@@ -988,16 +905,6 @@ export function useTerminalSession({
     // picks the wrong row count, the shell boots at that size, then the real font
     // loads -> refit -> SIGWINCH -> the shell reprints its prompt lower, leaving
     // stale blank rows (and a stray selection) above it.
-    let mounted = false
-    let mountWatchFrame = 0
-
-    const cancelMountWatch = () => {
-      if (mountWatchFrame) {
-        window.cancelAnimationFrame(mountWatchFrame)
-        mountWatchFrame = 0
-      }
-    }
-
     const mount = () => {
       if (disposed || !host.isConnected) {
         return
@@ -1005,7 +912,6 @@ export function useTerminalSession({
 
       term.open(host)
       mountedRef.current = true
-      mounted = true
       term.focus()
 
       // WebGL renderer matches the dashboard ChatPage path; xterm's default DOM
@@ -1015,16 +921,6 @@ export function useTerminalSession({
         webgl.onContextLoss(() => {
           webgl.dispose()
           webglRef.current = null
-
-          // The DOM renderer takes over, but the lost WebGL frame can leave
-          // the viewport black while the buffer stays intact: force a fit +
-          // full-row repaint so the buffered output shows again (#98273).
-          try {
-            fitAndResize()
-            term.refresh(0, term.rows - 1)
-          } catch {
-            // Best-effort repaint; the next resize repaints anyway.
-          }
         })
         term.loadAddon(webgl)
         webglRef.current = webgl
@@ -1032,12 +928,8 @@ export function useTerminalSession({
         console.warn('[hermes-terminal] WebGL unavailable; falling back to DOM', err)
       }
 
-      // Join the shared-atlas refresh fan-out: this terminal's atlas-clear
-      // callers mutate a texture the siblings draw from, so they must rebuild
-      // their models too (see redrawAllTerminals in terminals.ts).
-      cleanup.push(registerWebglRefresh(term, () => webglRef.current))
-
-      fitAndResize()
+      fitAndResize(initialActiveRef.current)
+      initialActiveFitRef.current = initialActiveRef.current
       startSession()
     }
 
@@ -1046,37 +938,6 @@ export function useTerminalSession({
       () => !disposed && host.isConnected
     ).then(fontFamily => {
       if (!fontFamily) {
-        // The pane shell can render this host before it's connected to the
-        // document (inactive keep-alive tab, a remount race, a reload
-        // mid-render) — isCurrent() above goes false at an await boundary and
-        // this used to return silently: the pane stayed blank forever, with
-        // no spawn attempt and no log line (#118004). Poll frames until the
-        // host connects, then retry the wait+mount exactly once; a host that
-        // never connects (or a dispose before then) stops the watch.
-        const watchForHost = () => {
-          if (disposed || mounted) {
-            return
-          }
-
-          if (host.isConnected) {
-            void prepareTerminalFontFamily(
-              () => latestFontFamilyRef.current,
-              () => !disposed && host.isConnected
-            ).then(next => {
-              if (next && !disposed && !mounted && host.isConnected) {
-                term.options.fontFamily = next
-                mount()
-              }
-            })
-
-            return
-          }
-
-          mountWatchFrame = window.requestAnimationFrame(watchForHost)
-        }
-
-        mountWatchFrame = window.requestAnimationFrame(watchForHost)
-
         return
       }
 
@@ -1087,7 +948,6 @@ export function useTerminalSession({
     return () => {
       disposed = true
       mountedRef.current = false
-      cancelMountWatch()
       cleanup.forEach(run => run())
       fitRef.current = null
 
@@ -1124,10 +984,8 @@ export function useTerminalSession({
       term.options.theme = withSurface(activeTheme)
       // The WebGL renderer caches glyph colors in a texture atlas, so a
       // light/dark switch leaves already-drawn cells stale until the atlas is
-      // cleared. No-op for the DOM fallback. The atlas is shared across every
-      // terminal with the same render config, so the clear must fan out to the
-      // siblings too (see redrawAllTerminals) or they keep stale glyphs.
-      redrawAllTerminals()
+      // cleared. No-op for the DOM fallback.
+      webglRef.current?.clearTextureAtlas()
     })
 
     return () => cancelAnimationFrame(raf)
@@ -1146,26 +1004,39 @@ export function useTerminalSession({
     return term ? registerTerminalReader(id, makeTerminalReader(term)) : undefined
   }, [id, status])
 
-  // On (re)activation: a WebGL terminal doesn't paint while visibility:hidden, so
-  // it reveals a stale/garbled frame. Refit, rebuild the glyph atlas, and force a
-  // full redraw against the live buffer, then focus. The atlas is shared across
-  // every terminal with the same render config, so rebuild ALL of them (see
-  // redrawAllTerminals) — refreshing only this one leaves its siblings drawing
-  // from wiped atlas pages.
+  // Only the active terminal observes its host. Every terminal stays mounted
+  // (PTY + scrollback preserved), but hidden tabs do no FitAddon/layout work.
+  // Re-activation owns one fit + atlas rebuild + redraw.
+  // eslint-disable-next-line no-restricted-syntax -- lifecycle flag prevents a duplicate first-mount fit
   useEffect(() => {
     if (!active || status !== 'open') {
+      if (!active) {
+        initialActiveFitRef.current = false
+      }
+
       return
     }
 
-    const frame = requestAnimationFrame(() => {
-      const term = termRef.current
+    const host = hostRef.current
 
-      fitRef.current?.()
-      redrawAllTerminals()
-      term?.focus()
+    if (!host) {
+      return
+    }
+
+    const fitOnActivate = !initialActiveFitRef.current
+    initialActiveFitRef.current = false
+
+    return observeActiveTerminalResize(host, {
+      fitOnActivate,
+      onFit: () => fitRef.current?.(true),
+      onActivate: () => {
+        const term = termRef.current
+
+        webglRef.current?.clearTextureAtlas()
+        term?.refresh(0, term.rows - 1)
+        term?.focus()
+      }
     })
-
-    return () => cancelAnimationFrame(frame)
   }, [active, status])
 
   // Flush a queued command (e.g. a provider-disconnect) into the live session.

@@ -20,8 +20,6 @@ export interface EffectiveSshRoute {
 export interface OpaqueProfileRoute {
   connectionId: string
   mode: 'local' | 'remote'
-  /** Present only when this route belongs to the window's authoritative primary connection. */
-  primary?: true
   profile: string
   targetProfile: string
 }
@@ -41,7 +39,6 @@ interface RegistryProfileRouteSource {
 interface BuildRegistryProfileRoutesOptions {
   agents: RegistryProfileRouteAgent[]
   legacyRoutes?: OpaqueProfileRoute[]
-  primaryConnectionId?: string
   sources: RegistryProfileRouteSource[]
 }
 
@@ -52,16 +49,6 @@ interface BuildOpaqueProfileRoutesOptions {
   primaryProfile: string
   profileNames: string[]
   resolveSsh: (config: ProfileRouteConfig) => Promise<EffectiveSshRoute>
-}
-
-/** A 'connect-on-demand' local enumeration was intentionally deferred, not
- * failed — it must not be treated as a failure or Bot Mode will synthesize
- * cached local rows on remote-only workspaces where local was never dialed.
- * The sentinel is set by `enumerateRegistryAgentSources` in main.ts when
- * `shouldDeferLocalEnumeration` (connection-registry.ts) defers the local
- * source. */
-export function isLocalEnumerationFailure(error?: string): boolean {
-  return Boolean(error) && error !== 'connect-on-demand'
 }
 
 /** Return cached local profile names only when the local roster read failed. */
@@ -260,7 +247,6 @@ export async function buildOpaqueProfileRoutes({
  */
 export function buildRegistryProfileRoutes({
   agents,
-  primaryConnectionId,
   sources
 }: BuildRegistryProfileRoutesOptions): OpaqueProfileRoute[] {
   const sourceById = new Map(sources.map(source => [source.id, source]))
@@ -282,7 +268,6 @@ export function buildRegistryProfileRoutes({
       routes.push({
         connectionId: source.id,
         mode: 'local',
-        ...(source.id === primaryConnectionId ? { primary: true } : {}),
         profile,
         targetProfile: profile
       })
@@ -293,7 +278,6 @@ export function buildRegistryProfileRoutes({
     routes.push({
       connectionId: source.id,
       mode: 'remote',
-      ...(source.id === primaryConnectionId ? { primary: true } : {}),
       profile,
       targetProfile: source.kind === 'ssh' && source.remoteProfile ? normalizeProfile(source.remoteProfile) : profile
     })

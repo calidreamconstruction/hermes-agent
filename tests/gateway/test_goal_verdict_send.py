@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -70,7 +70,7 @@ class _RecordingAdapter:
         return _R()
 
 
-def _make_runner_with_adapter(session_id: str | None = None):
+def _make_runner_with_adapter(session_id: str = None):
     from gateway.run import GatewayRunner
     import uuid
 
@@ -84,7 +84,7 @@ def _make_runner_with_adapter(session_id: str | None = None):
     runner._queued_events = {}
 
     src = _make_source()
-    # Default to a unique session_id so parallel runs
+    # Default to a unique session_id so xdist parallel runs on the same worker
     # don't see each other's GoalManager state (DEFAULT_DB_PATH gets frozen at
     # module-import time, defeating per-test HERMES_HOME monkeypatches).
     session_entry = SessionEntry(
@@ -172,25 +172,5 @@ async def test_goal_verdict_budget_exhausted_sends_pause(hermes_home):
     assert "turns used" in content.lower()
     # No continuation enqueued when budget is exhausted
     assert not adapter._pending_messages
-
-
-@pytest.mark.parametrize("database_available", [False, True])
-def test_missing_gateway_transcript_keeps_completion_guard_enabled(database_available):
-    """A missing or unreadable transcript must never request legacy evidence-free judging."""
-    runner, _adapter, session_entry, src = _make_runner_with_adapter()
-    manager = MagicMock(session_id=session_entry.session_id)
-    manager.is_active.return_value = True
-    manager.evaluate_after_turn.return_value = {}
-    runner._post_turn_manager = AsyncMock(return_value=manager)
-    database = MagicMock() if database_available else None
-    if database is not None:
-        database.get_messages.side_effect = RuntimeError("transcript temporarily unavailable")
-
-    with patch("hermes_cli.goals._get_session_db", return_value=database):
-        asyncio.run(runner._post_turn_goal_continuation(
-            session_entry=session_entry, source=src, final_response="All repairs are done.",
-        ))
-
-    assert manager.evaluate_after_turn.call_args.kwargs["turn_messages"] == []
 
 
