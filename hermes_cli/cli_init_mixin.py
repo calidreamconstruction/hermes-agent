@@ -227,8 +227,11 @@ class CLIInitMixin:
                 plugin_ts_names = get_plugin_toolset_keys_nowait()
             except Exception:
                 plugin_ts_names = set()
+            mcp_toolset_aliases = {f'mcp-{n}' for n in mcp_names}
             invalid = [t for t in toolsets
-                       if not validate_toolset(t) and t not in mcp_names and t not in plugin_ts_names]
+                       if not validate_toolset(t) and t not in mcp_names
+                       and t not in mcp_toolset_aliases and t != 'no_mcp'
+                       and t not in plugin_ts_names]
             if invalid:
                 from agent.i18n import t as _t
                 self._console_print(f"[bold red]{_t('cli.startup.unknown_toolsets', names=', '.join(invalid))}[/]")
