@@ -11,7 +11,6 @@
 import { useStore } from '@nanostores/react'
 import { useQuery } from '@tanstack/react-query'
 import { atom } from 'nanostores'
-import { useEffect, useMemo, useRef } from 'react'
 
 import { RightSidebarPane } from '@/app/right-sidebar'
 import { ReviewPane } from '@/app/right-sidebar/review'
@@ -26,7 +25,7 @@ import { getLogs } from '@/hermes'
 import { normalizeOrLocalPreviewTarget } from '@/lib/local-preview'
 import { cn } from '@/lib/utils'
 import { openPreview } from '@/store/preview'
-import { $focusedWorkspaceCwd } from '@/store/session-states'
+import { $currentCwd } from '@/store/session'
 
 // ---------------------------------------------------------------------------
 // Logs — live agent-log tail. ⌘K-only chrome: the pane contribution exists
@@ -34,42 +33,12 @@ import { $focusedWorkspaceCwd } from '@/store/session-states'
 // the controller) — never in a default layout, never a standing tab.
 // ---------------------------------------------------------------------------
 
-const LOGS_BOTTOM_THRESHOLD = 48
-
 export function LogsPane() {
   const { data, error } = useQuery({
     queryKey: ['contrib-logs-tail'],
     queryFn: () => getLogs({ lines: 300 }),
     refetchInterval: 5000
   })
-
-  const preRef = useRef<HTMLPreElement>(null)
-  const shouldStickRef = useRef(true)
-
-  // Stick-to-bottom: auto-scroll when the user is already near the bottom.
-  useEffect(() => {
-    const el = preRef.current
-
-    if (!el || !shouldStickRef.current) {
-      return
-    }
-
-    const raf = requestAnimationFrame(() => {
-      el.scrollTo({ top: el.scrollHeight })
-    })
-
-    return () => cancelAnimationFrame(raf)
-  }, [data])
-
-  function handleScroll() {
-    const el = preRef.current
-
-    if (!el) {
-      return
-    }
-
-    shouldStickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= LOGS_BOTTOM_THRESHOLD
-  }
 
   if (error) {
     return <div className="p-3 text-xs text-(--ui-text-quaternary)">log unavailable: {String(error)}</div>
@@ -86,12 +55,7 @@ export function LogsPane() {
   // No chrome of its own — the zone header (when the user summons it) is the
   // pane's only label. Just the tail.
   return (
-    <pre
-      className="h-full min-h-0 overflow-auto whitespace-pre-wrap break-words p-2.5 font-mono text-[0.66rem] leading-relaxed text-(--ui-text-secondary)"
-      data-selectable-text="true"
-      onScroll={handleScroll}
-      ref={preRef}
-    >
+    <pre className="h-full min-h-0 overflow-auto whitespace-pre-wrap break-words p-2.5 font-mono text-[0.66rem] leading-relaxed text-(--ui-text-secondary)">
       {data.lines.join('\n')}
     </pre>
   )
@@ -107,10 +71,10 @@ export const $restartPreviewServer = atom<((url: string, context?: string) => Pr
 
 /** Open a file from the tree in the real preview pipeline. */
 function previewFile(path: string) {
-  void normalizeOrLocalPreviewTarget(path, $focusedWorkspaceCwd.get() || undefined)
+  void normalizeOrLocalPreviewTarget(path, $currentCwd.get() || undefined)
     .then(target => {
       if (target) {
-        openPreview(target)
+        openPreview(target, 'file-browser')
       }
     })
     .catch(() => undefined)
@@ -134,7 +98,7 @@ export function FilesPane() {
 // ---------------------------------------------------------------------------
 
 export function ReviewPaneContent() {
-  const cwd = useStore($focusedWorkspaceCwd)
+  const cwd = useStore($currentCwd)
 
   // Keyed by cwd like DesktopController so switching projects rebuilds the
   // diff state instead of showing the previous repo's files.
@@ -154,35 +118,24 @@ export function ReviewPaneContent() {
 
 /** Collect statusbar contributions for one side. A `render()` contribution
  *  becomes a render-item (arbitrary stateful node); otherwise the declarative
- *  `data` payload is the StatusbarItem.
- *
- *  Memoized on `items` (a stable reference from `useContributions` until the
- *  area actually changes — see `registry.getArea`'s snapshot cache): without
- *  this, every render-item's `render` wrapper was a brand-new arrow function,
- *  so `ContribRender`'s `createElement(render)` saw a different component
- *  TYPE on every statusbar re-render and remounted the whole contributed
- *  subtree — dropping any state it held (e.g. an open Dialog). See #91603. */
+ *  `data` payload is the StatusbarItem. */
 export function useStatusbarContributions(side: 'left' | 'right'): StatusbarItem[] {
   const items = useContributions(`statusBar.${side}`)
 
-  return useMemo(
-    () =>
-      items
-        .map(c =>
-          c.render
-            ? ({
-                id: c.id,
-                render: () => (
-                  <ContribBoundary id={c.id} variant="chip">
-                    <ContribRender render={c.render!} />
-                  </ContribBoundary>
-                )
-              } satisfies StatusbarItem)
-            : (c.data as StatusbarItem)
-        )
-        .filter(Boolean),
-    [items]
-  )
+  return items
+    .map(c =>
+      c.render
+        ? ({
+            id: c.id,
+            render: () => (
+              <ContribBoundary id={c.id} variant="chip">
+                <ContribRender render={c.render!} />
+              </ContribBoundary>
+            )
+          } satisfies StatusbarItem)
+        : (c.data as StatusbarItem)
+    )
+    .filter(Boolean)
 }
 
 /** Collect TitlebarTool data contributions for one side of the titlebar. */
@@ -193,7 +146,7 @@ export function useTitlebarToolContributions(side: 'left' | 'right'): TitlebarTo
 }
 
 /**
- * Bridge a page's `GroupSetter` extension point (CapabilitiesView, MessagingView,
+ * Bridge a page's `GroupSetter` extension point (SkillsView, MessagingView,
  * ChatPreviewRail, …) into the registry: each call replaces the group's items
  * as DATA contributions in `<prefix>.<side>`, so page-owned items flow through
  * the same pipe plugins use. Setting an empty list clears the group.

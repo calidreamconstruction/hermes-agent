@@ -3,15 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandItemCheck,
-  CommandList
-} from '@/components/ui/command'
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import {
   Dialog,
   DialogContent,
@@ -24,7 +16,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { SanitizedInput } from '@/components/ui/sanitized-input'
 import type { HermesGitBranch } from '@/global'
 import { useI18n } from '@/i18n'
-import { isSubmitEnter } from '@/lib/ime'
 import { gitRef } from '@/lib/sanitize'
 import { notifyError } from '@/store/notifications'
 import {
@@ -250,17 +241,10 @@ export function WorktreeDialog() {
                 <Codicon className="shrink-0 text-(--ui-text-tertiary)" name="chevron-down" size="0.75rem" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent
-              align="start"
-              className="z-(--z-modal-popover) min-w-(--radix-popover-trigger-width)"
-              variant="menu"
-            >
-              <Command
-                filter={(value, search) => (value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0)}
-                variant="menu"
-              >
+            <PopoverContent align="start" className="z-(--z-modal-popover) min-w-(--radix-popover-trigger-width) p-0">
+              <Command filter={(value, search) => (value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0)}>
                 <CommandInput autoFocus placeholder={p.worktreeProjectPlaceholder} />
-                <CommandList>
+                <CommandList className="max-h-64">
                   <CommandEmpty>{p.worktreeProjectNone}</CommandEmpty>
                   <CommandGroup>
                     {projectOptions.map(option => (
@@ -278,7 +262,9 @@ export function WorktreeDialog() {
                       >
                         <Codicon className="shrink-0 text-(--ui-text-tertiary)" name="repo" size="0.8rem" />
                         <span className="truncate">{option.label}</span>
-                        <CommandItemCheck checked={option === activeOption} />
+                        {option === activeOption && (
+                          <Codicon className="ml-auto shrink-0 text-(--ui-accent)" name="check" size="0.8rem" />
+                        )}
                       </CommandItem>
                     ))}
                   </CommandGroup>
@@ -324,7 +310,7 @@ export function WorktreeDialog() {
               autoFocus
               disabled={pending}
               onKeyDown={event => {
-                if (isSubmitEnter(event)) {
+                if (event.key === 'Enter') {
                   event.preventDefault()
                   void submit()
                 } else if (event.key === 'Escape') {

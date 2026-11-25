@@ -39,7 +39,7 @@ def _ensure_discord_mock():
 
 _ensure_discord_mock()
 
-from plugins.platforms.discord.adapter import DiscordAdapter
+from plugins.platforms.discord.adapter import DiscordAdapter  # noqa: E402
 
 
 MAX = DiscordAdapter.MAX_MESSAGE_LENGTH
@@ -67,7 +67,8 @@ class TestCapSplitChunks:
         capped = adapter._cap_split_chunks(chunks)
         assert len(capped) == CAP
         assert capped[0] == chunks[0]
-        assert capped[-1] not in chunks  # last slot is the truncation notice
+        assert "Response truncated" in capped[-1]
+        assert "delivery limit" in capped[-1]
         # The notice itself must stay under Discord's per-message cap.
         assert len(capped[-1]) <= MAX
 

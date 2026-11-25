@@ -8,8 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from gateway.config import Platform, PlatformConfig
-from gateway.platforms.base import BasePlatformAdapter, SendResult
-from gateway.platforms.event import MessageEvent, MessageType, ProcessingOutcome
+from gateway.platforms.base import BasePlatformAdapter, MessageEvent, MessageType, ProcessingOutcome, SendResult
 from gateway.session import SessionSource, build_session_key
 
 
@@ -40,6 +39,7 @@ class DummyTelegramAdapter(BasePlatformAdapter):
 
     async def send_typing(self, chat_id: str, metadata=None) -> None:
         self.typing.append({"chat_id": chat_id, "metadata": metadata})
+        return None
 
     async def stop_typing(self, chat_id: str, metadata=None) -> None:
         self.typing.append({"chat_id": chat_id, "stopped": True, "metadata": metadata})

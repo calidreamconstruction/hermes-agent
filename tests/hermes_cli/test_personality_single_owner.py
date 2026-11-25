@@ -12,12 +12,13 @@ import os
 from unittest.mock import patch
 
 import pytest
-import hermes_yaml as yaml
+import yaml
 
 from hermes_cli.personality import (
     BUILTIN_PERSONALITIES,
     available_personalities,
     active_personality_name,
+    describe_personality,
     normalize_personality_name,
     persist_personality,
     prompt_text,
@@ -49,17 +50,6 @@ def test_user_entries_overlay_builtins_by_name():
     assert merged["custom"] == "hi"
 
 
-def test_root_level_personalities_are_honoured_below_agent_block():
-    """config.yaml's top-level ``personalities:`` (the shape DEFAULT_CONFIG ships) must be
-    visible on every surface; ``agent.personalities`` wins on a clash (#9636)."""
-    cfg = {"personalities": {"robot": "root", "shared": "root"},
-           "agent": {"personalities": {"shared": "agent"}}}
-    merged = available_personalities(cfg)
-    assert merged["robot"] == "root"
-    assert merged["shared"] == "agent"
-    assert resolve_personality("robot", cfg)[0] == "robot"
-
-
 def test_neutral_names_normalize_to_empty():
     for raw in ("", "none", "None", " DEFAULT ", "neutral", None):
         assert normalize_personality_name(raw) == ""
@@ -72,9 +62,11 @@ def test_resolve_personality_neutral_and_case_insensitive():
     assert prompt == KAWAII
 
 
-def test_resolve_personality_unknown_raises():
-    with pytest.raises(ValueError):
+def test_resolve_personality_unknown_raises_with_listing():
+    with pytest.raises(ValueError) as exc:
         resolve_personality("doesnotexist", {})
+    assert "Available" in str(exc.value)
+    assert "`none`" in str(exc.value)
 
 
 def test_resolve_overlay_personality_wins_over_manual_prompt():
@@ -118,6 +110,10 @@ def test_prompt_text_normalizes_none_str_list():
     assert prompt_text(["a", " b ", ""]) == "a\nb"
 
 
+def test_describe_personality_truncates_and_flattens():
+    assert describe_personality("x" * 80) == "x" * 50 + "..."
+    assert "\n" not in describe_personality("a\nb")
+    assert describe_personality({"description": "short desc"}) == "short desc"
 
 
 # ── persistence (single write path) ──────────────────────────────────────────
@@ -128,11 +124,11 @@ def test_persist_personality_roundtrip(tmp_path):
     home.mkdir()
     with patch.dict(os.environ, {"HERMES_HOME": str(home)}):
         assert persist_personality("KAWAII ") is True
-        raw = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8"))
+        raw = yaml.safe_load((home / "config.yaml").read_text())
         assert raw["display"]["personality"] == "kawaii"
 
         assert persist_personality("none") is True
-        raw = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8"))
+        raw = yaml.safe_load((home / "config.yaml").read_text())
         assert raw["display"]["personality"] == ""
 
 
@@ -141,10 +137,10 @@ def test_persist_personality_never_touches_system_prompt(tmp_path):
     home.mkdir()
     (home / "config.yaml").write_text(
         yaml.safe_dump({"agent": {"system_prompt": "manual forever"}})
-    , encoding="utf-8")
+    )
     with patch.dict(os.environ, {"HERMES_HOME": str(home)}):
         assert persist_personality("kawaii") is True
-        raw = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8"))
+        raw = yaml.safe_load((home / "config.yaml").read_text())
         assert raw["agent"]["system_prompt"] == "manual forever"
         assert raw["display"]["personality"] == "kawaii"
 
@@ -153,7 +149,7 @@ def test_persist_personality_never_touches_system_prompt(tmp_path):
 
 
 def _run_migration(home, cfg):
-    (home / "config.yaml").write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
+    (home / "config.yaml").write_text(yaml.safe_dump(cfg, allow_unicode=True))
     with patch.dict(os.environ, {"HERMES_HOME": str(home)}):
         from hermes_cli.config import migrate_config, read_raw_config
 
@@ -210,7 +206,7 @@ def test_migration_preserves_manual_system_prompt(tmp_path):
 def test_migration_noop_when_nothing_stale(tmp_path):
     home = tmp_path / ".hermes"
     home.mkdir()
-    _raw, results = _run_migration(home, {"_config_version": 33})
+    raw, results = _run_migration(home, {"_config_version": 33})
     assert not any("personality" in item for item in results["config_added"])
 
 

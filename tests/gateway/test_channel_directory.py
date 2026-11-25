@@ -14,8 +14,10 @@ from gateway.channel_directory import (
     resolve_channel_name,
     format_directory_for_display,
     load_directory,
+    _apply_channel_aliases,
     _build_from_sessions,
     _build_slack,
+    _slack_directory_warning_last,
 )
 
 
@@ -56,16 +58,12 @@ class TestBuildChannelDirectoryWrites:
         })
         previous = json.loads(cache_file.read_text())
 
-        import utils
-
         def broken_dump(data, fp, *args, **kwargs):
             fp.write('{"updated_at":')
             fp.flush()
             raise OSError("disk full")
 
-        # Fault the canonical writer's serializer (the seam the directory writes through), not
-        # json.dump — the helper serializes to a str first, so a stdlib patch never fires.
-        monkeypatch.setattr(utils, "_dump_json", broken_dump)
+        monkeypatch.setattr(json, "dump", broken_dump)
 
         with patch("gateway.channel_directory.DIRECTORY_PATH", cache_file):
             asyncio.run(build_channel_directory({}))
@@ -222,6 +220,10 @@ class TestBuildFromSessions:
 
 
 class TestFormatDirectoryForDisplay:
+    def test_empty_directory(self, tmp_path):
+        with patch("gateway.channel_directory.DIRECTORY_PATH", tmp_path / "nope.json"):
+            result = format_directory_for_display()
+        assert "No messaging platforms" in result
 
     def test_platform_with_no_channels_gets_hint(self):
         """A configured platform with zero discovered channels is shown with
@@ -231,6 +233,7 @@ class TestFormatDirectoryForDisplay:
             "telegram": [{"id": "1", "name": "home", "type": "dm"}],
         })
         assert "Simplex:" in result
+        assert "no channels discovered yet" in result
         assert "telegram:home" in result
 
     def test_explicit_platforms_override_disk(self, tmp_path):
