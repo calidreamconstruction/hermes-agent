@@ -26,8 +26,6 @@ from run_agent import AIAgent
 
 
 # A plausible-looking OAuth token (``sk-ant-`` without the ``-api`` suffix).
-_OAUTH_LIKE_TOKEN = "sk-ant-oauth-example-1234567890abcdef"
-_API_KEY_TOKEN = "sk-ant-api-abcdef1234567890"
 
 
 @pytest.fixture
