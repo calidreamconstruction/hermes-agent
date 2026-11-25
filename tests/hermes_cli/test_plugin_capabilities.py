@@ -11,10 +11,11 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-import hermes_yaml as yaml
+import yaml
 
 from hermes_cli.plugin_capabilities import (
     CAPABILITY_REGISTRY,
+    VALID_CAPABILITY_IDS,
     capability_set_hash,
     consent_hash,
     declared_set_changed,
@@ -47,12 +48,18 @@ class TestRegistry:
             assert spec.legacy_path, spec.id
             assert spec.description
 
+    def test_known_ids(self):
+        assert "tools.override" in VALID_CAPABILITY_IDS
+        assert "llm.model_override" in VALID_CAPABILITY_IDS
 
 
 # ── Declaration parsing ──────────────────────────────────────────────────────
 
 
 class TestDeclarationParsing:
+    def test_parses_known_ids(self):
+        got = parse_declared_capabilities(["tools.override", "llm.model_override"])
+        assert got == ["tools.override", "llm.model_override"]
 
     def test_drops_unknown_ids(self):
         got = parse_declared_capabilities(["tools.override", "root.everything"])
@@ -76,7 +83,7 @@ class TestDeclarationParsing:
 
     def test_manifest_field_lands_on_parsed_manifest(self, tmp_path):
         """PluginManifest picks up ``capabilities:`` from plugin.yaml."""
-        from hermes_cli.plugins import parse_manifest_file
+        from hermes_cli.plugins import PluginManager
 
         plugin_dir = tmp_path / "capplug"
         plugin_dir.mkdir()
@@ -85,21 +92,23 @@ class TestDeclarationParsing:
             "capabilities:\n  - tools.override\n  - bogus.capability\n",
             encoding="utf-8",
         )
-        manifest = parse_manifest_file(
+        mgr = PluginManager()
+        manifest = mgr._parse_manifest(
             plugin_dir / "plugin.yaml", plugin_dir, "user", ""
         )
         assert manifest is not None
         assert manifest.capabilities == ["tools.override"]
 
     def test_manifest_without_capabilities_field(self, tmp_path):
-        from hermes_cli.plugins import parse_manifest_file
+        from hermes_cli.plugins import PluginManager
 
         plugin_dir = tmp_path / "plainplug"
         plugin_dir.mkdir()
         (plugin_dir / "plugin.yaml").write_text(
             "name: plainplug\n", encoding="utf-8"
         )
-        manifest = parse_manifest_file(
+        mgr = PluginManager()
+        manifest = mgr._parse_manifest(
             plugin_dir / "plugin.yaml", plugin_dir, "user", ""
         )
         assert manifest is not None
@@ -168,6 +177,9 @@ class TestConsentPersistence:
         entry = _read_cfg(hermes_home)["plugins"]["entries"]["capplug"]
         assert entry["llm"]["allow_model_override"] is True
 
+    def test_granted_capabilities_roundtrip(self, hermes_home):
+        record_consent("capplug", ["tools.override"], ["tools.override"])
+        assert granted_capabilities("capplug") == frozenset({"tools.override"})
 
     def test_grant_is_union_with_previous(self, hermes_home):
         record_consent("capplug", ["tools.override"], ["tools.override"])
@@ -180,6 +192,9 @@ class TestConsentPersistence:
             {"tools.override", "llm.model_override"}
         )
 
+    def test_capability_granted_after_consent(self, hermes_home):
+        record_consent("capplug", ["tools.override"], ["tools.override"])
+        assert plugin_capability_granted("capplug", "tools.override") is True
 
     def test_declined_stays_off(self, hermes_home):
         # No record_consent call — nothing granted.

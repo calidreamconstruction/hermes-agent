@@ -6,10 +6,7 @@ description: "在 CLI、Telegram、Discord 及 Discord 语音频道中设置和�
 
 # 在 Hermes 中使用语音模式
 
-本页的 Python 依赖命令使用 [PM 准备的源码环境](../reference/package-management.md#developer-workflow)。
-依赖变更后，请重新激活该 checkout 并重启 Hermes。
-
-本指南是[语音模式功能参考](../user-guide/features/voice-mode.md)的实用配套文档。
+本指南是[语音模式功能参考](/user-guide/features/voice-mode)的实用配套文档。
 
 功能页面介绍语音模式能做什么，本指南则说明如何真正用好它。
 
@@ -60,34 +57,32 @@ What tools do you have available?
 ### CLI 麦克风 + 播放
 
 ```bash
-cd ~/.hermes/hermes-agent && python -c "import pm; pm.sync_venv(['voice'], explicit=True)"
+cd ~/.hermes/hermes-agent && uv pip install -e ".[voice]"
 ```
 
 ### 消息平台
 
 ```bash
-cd ~/.hermes/hermes-agent && python -c "import pm; pm.sync_venv(['messaging'], explicit=True)"
+cd ~/.hermes/hermes-agent && uv pip install -e ".[messaging]"
 ```
 
 ### 高级 ElevenLabs TTS
 
 ```bash
-cd ~/.hermes/hermes-agent && python -c "import pm; pm.sync_venv(['tts-premium'], explicit=True)"
+cd ~/.hermes/hermes-agent && uv pip install -e ".[tts-premium]"
 ```
 
 ### 本地 NeuTTS（可选）
 
-声明的 `neutts` 依赖要求 Python 低于 3.14，而 Hermes 运行时要求 Python 3.14。
-因此该 extra 不会在 Hermes 运行时安装 NeuTTS。请选择兼容的提供商。
-独立的 NeuTTS 命令提供商需要自行管理兼容的 Python 环境。
-
-### 同时启用语音和消息平台
-
 ```bash
-python -c "import pm; pm.sync_venv(['voice', 'messaging', 'tts-premium', 'edge-tts'], explicit=True)"
+python -m pip install -U neutts[all]
 ```
 
-`all` extra 并不包含所有可选功能，也不包含上述语音和消息依赖。
+### 全部安装
+
+```bash
+cd ~/.hermes/hermes-agent && uv pip install -e ".[all]"
+```
 
 ## 第三步：安装系统依赖
 
@@ -154,13 +149,13 @@ ELEVENLABS_API_KEY=***
 
 ### 如果使用 `hermes setup`
 
-设置向导通过 PM 请求声明的 Python extras，不能绕过版本或平台限制：
+如果你在设置向导中选择了 NeuTTS，Hermes 会检查 `neutts` 是否已安装。如果缺失，向导会告知你 NeuTTS 需要 Python 包 `neutts` 和系统包 `espeak-ng`，并提供自动安装，使用平台包管理器安装 `espeak-ng`，然后运行：
 
-声明的 `neutts` 依赖要求 Python 低于 3.14，而 Hermes 运行时要求 Python 3.14。
-因此该 extra 不会在 Hermes 运行时安装 NeuTTS。请选择兼容的提供商。
-独立的 NeuTTS 命令提供商需要自行管理兼容的 Python 环境。
+```bash
+python -m pip install -U neutts[all]
+```
 
-如果依赖不支持当前平台，请选择其他提供商。
+如果跳过安装或安装失败，向导会回退到 Edge TTS。
 
 ## 第五步：推荐配置
 
@@ -467,8 +462,8 @@ Hermes 加入 Discord 语音频道（VC），监听用户语音，转录后运�
 
 ## 下一步阅读
 
-- [语音模式功能参考](../user-guide/features/voice-mode.md)
-- [消息 Gateway](../user-guide/messaging/index.md)
-- [Discord 设置](../user-guide/messaging/discord.md)
-- [Telegram 设置](../user-guide/messaging/telegram.md)
-- [配置](../user-guide/configuration.md)
+- [语音模式功能参考](/user-guide/features/voice-mode)
+- [消息 Gateway](/user-guide/messaging)
+- [Discord 设置](/user-guide/messaging/discord)
+- [Telegram 设置](/user-guide/messaging/telegram)
+- [配置](/user-guide/configuration)

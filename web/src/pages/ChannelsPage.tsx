@@ -34,10 +34,8 @@ import type {
   WhatsAppOnboardingStartResponse,
 } from "@/lib/api";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
-import { AllowlistInput } from "@/components/AllowlistInput";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { cn, themedBody } from "@/lib/utils";
-import { errorMessage } from "@/lib/api-error";
 
 // State → badge mapping. The backend emits a small, fixed vocabulary plus
 // whatever the live gateway runtime reports (connected/disconnected/fatal).
@@ -168,7 +166,7 @@ export default function ChannelsPage() {
         setEnvPath(res.env_path || "~/.hermes/.env");
         setGatewayStartCommand(res.gateway_start_command || "hermes gateway start");
       })
-      .catch((e) => showToast(`Could not load channels: ${errorMessage(e)}`, "error"));
+      .catch((e) => showToast(`Error: ${e}`, "error"));
   }, [showToast]);
 
   useEffect(() => {
@@ -178,8 +176,7 @@ export default function ChannelsPage() {
   const openConfig = (platform: MessagingPlatform) => {
     const initial: Record<string, string> = {};
     platform.env_vars.forEach((v) => {
-      // Allowlists open with their saved entries (they are IDs, not secrets).
-      initial[v.key] = v.is_list ? v.value || "" : "";
+      initial[v.key] = "";
     });
     setDraftEnv(initial);
     setFieldErrors({});
@@ -191,19 +188,10 @@ export default function ChannelsPage() {
     // Only send fields the user actually filled in — leaving a field blank
     // preserves the existing value rather than clobbering it.
     const env: Record<string, string> = {};
-    const clearEnv: string[] = [];
-    editing.env_vars.forEach((field) => {
-      const v = (draftEnv[field.key] || "").trim();
-      if (field.is_list) {
-        // Allowlists are prefilled, so an unchanged one is not an edit and an emptied one is a clear.
-        if (v === (field.value || "")) return;
-        if (v) env[field.key] = v;
-        else if (field.is_set) clearEnv.push(field.key);
-      } else if (v) {
-        env[field.key] = v;
-      }
+    Object.entries(draftEnv).forEach(([k, v]) => {
+      if (v.trim()) env[k] = v.trim();
     });
-    if (Object.keys(env).length === 0 && clearEnv.length === 0) {
+    if (Object.keys(env).length === 0) {
       showToast("Nothing to save — fill in at least one field.", "error");
       return;
     }
@@ -226,24 +214,14 @@ export default function ChannelsPage() {
     }
     setSaving(true);
     try {
-      const body: MessagingPlatformUpdate = {
-        env,
-        enabled: true,
-        ...(clearEnv.length ? { clear_env: clearEnv } : {}),
-      };
-      const result = await api.updateMessagingPlatform(editing.id, body);
-      showToast(
-        result.hot_served
-          ? `${editing.name} saved; the running gateway is connecting`
-          : `${editing.name} saved`,
-        "success",
-      );
+      const body: MessagingPlatformUpdate = { env, enabled: true };
+      await api.updateMessagingPlatform(editing.id, body);
+      showToast(`${editing.name} saved`, "success");
       setEditing(null);
-      if (!result.hot_served) setRestartNeeded(true);
+      setRestartNeeded(true);
       await load();
-      if (result.hot_served) setTimeout(() => void load(), 4000);
     } catch (e) {
-      showToast(`Failed to save: ${errorMessage(e)}`, "error");
+      showToast(`Failed to save: ${e}`, "error");
     } finally {
       setSaving(false);
     }
@@ -253,7 +231,7 @@ export default function ChannelsPage() {
     const next = !platform.enabled;
     setTogglingId(platform.id);
     try {
-      const result = await api.updateMessagingPlatform(platform.id, { enabled: next });
+      await api.updateMessagingPlatform(platform.id, { enabled: next });
       setPlatforms((prev) =>
         prev.map((p) =>
           p.id === platform.id
@@ -261,10 +239,9 @@ export default function ChannelsPage() {
             : p,
         ),
       );
-      if (result.hot_served) setTimeout(() => void load(), 4000);
-      else setRestartNeeded(true);
+      setRestartNeeded(true);
     } catch (e) {
-      showToast(`Could not update the channel: ${errorMessage(e)}`, "error");
+      showToast(`Error: ${e}`, "error");
     } finally {
       setTogglingId(null);
     }
@@ -276,7 +253,7 @@ export default function ChannelsPage() {
       const res = await api.testMessagingPlatform(platform.id);
       showToast(`${platform.name}: ${res.message}`, res.ok ? "success" : "error");
     } catch (e) {
-      showToast(`Could not test the channel: ${errorMessage(e)}`, "error");
+      showToast(`Error: ${e}`, "error");
     } finally {
       setTestingId(null);
     }
@@ -291,7 +268,7 @@ export default function ChannelsPage() {
       // Give the gateway a moment to come up, then refresh status.
       setTimeout(() => void load(), 4000);
     } catch (e) {
-      showToast(`Failed to restart: ${errorMessage(e)}`, "error");
+      showToast(`Failed to restart: ${e}`, "error");
     } finally {
       setRestarting(false);
     }
@@ -494,23 +471,6 @@ export default function ChannelsPage() {
                       {field.description}
                     </span>
                   )}
-                  {field.is_list ? (
-                    <AllowlistInput
-                      id={`field-${field.key}`}
-                      label={field.prompt || field.key}
-                      value={draftEnv[field.key] ?? ""}
-                      invalid={Boolean(fieldErrors[field.key])}
-                      onChange={(nextValue) => {
-                        setDraftEnv((prev) => ({ ...prev, [field.key]: nextValue }));
-                        setFieldErrors((prev) => {
-                          if (!prev[field.key]) return prev;
-                          const next = { ...prev };
-                          delete next[field.key];
-                          return next;
-                        });
-                      }}
-                    />
-                  ) : (
                   <Input
                     id={`field-${field.key}`}
                     type={field.is_password ? "password" : "text"}
@@ -533,7 +493,6 @@ export default function ChannelsPage() {
                       });
                     }}
                   />
-                  )}
                   {fieldErrors[field.key] && (
                     <span className="text-xs text-destructive">
                       {fieldErrors[field.key]}
@@ -606,12 +565,6 @@ export default function ChannelsPage() {
                       {platform.error_message && (
                         <span className="text-xs text-destructive">
                           {platform.error_message}
-                        </span>
-                      )}
-                      {platform.ingress_url && (
-                        <span className="text-xs text-muted-foreground break-all">
-                          Callback URL (shared listener):{" "}
-                          <code className="font-mono">{platform.ingress_url}</code>
                         </span>
                       )}
                     </div>

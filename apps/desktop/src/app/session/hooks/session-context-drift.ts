@@ -24,17 +24,6 @@ export function routeTargetFromToken(token: string): RouteTarget {
   return routeSessionId(pathname) ?? (isNewChatRoute(pathname) ? '__new__' : null)
 }
 
-/**
- * Whether a resume begun under `startRouteToken` still owns the view. The route
- * arriving at the resumed session itself is not a switch: create/branch call
- * navigate(target) and then resume(target) before the token re-renders, so the
- * token captured at entry can still name the previous chat. Reading that commit
- * as drift abandoned the branch child's resume and left its pane on the loader.
- */
-export function resumeRouteStillCurrent(startRouteToken: string, nowRouteToken: string, storedSessionId: string) {
-  return nowRouteToken === startRouteToken || routeTargetFromToken(nowRouteToken) === storedSessionId
-}
-
 interface SessionContextDriftArgs {
   startRouteToken: string
   nowRouteToken: string
@@ -67,45 +56,6 @@ interface SessionContextDriftArgs {
    * session that has ever compressed.
    */
   submitTargetComposerScope?: string | null
-  /**
-   * The owner token of the request this check belongs to. Only pins created by
-   * the SAME owner are honored; omit to ignore pins entirely.
-   */
-  pinOwner?: string
-}
-
-// Pins are OWNED (#85590 review): a drift check honors only pins created by the
-// SAME owner token — the submit/route generation that created them — so an
-// overlapping request can never suppress another request's drift detection.
-const pinnedByOwner = new Map<string, Set<string>>()
-
-/** Shared empty set: a non-owning caller allocates nothing. */
-const NO_PINS: ReadonlySet<string> = new Set()
-
-/** Mark `storedSessionId` as re-homed by `owner` until its terminal release. */
-export function pinStoredSessionForOwner(owner: string, storedSessionId: string): void {
-  const pinned = pinnedByOwner.get(owner)
-
-  if (pinned) {
-    pinned.add(storedSessionId)
-  } else {
-    pinnedByOwner.set(owner, new Set([storedSessionId]))
-  }
-}
-
-/** Terminal release: the owner's request settled (accepted, failed, cancelled).
- *  Route settlement is evidence, not a tick budget. */
-export function releaseStoredSessionPins(owner: string): void {
-  pinnedByOwner.delete(owner)
-}
-
-export function pinnedStoredSessionIdsForOwner(owner: string): ReadonlySet<string> {
-  return pinnedByOwner.get(owner) ?? NO_PINS
-}
-
-/** Owners still holding a pin. Observability + tests. */
-export function pinnedOwnerCount(): number {
-  return pinnedByOwner.size
 }
 
 /**
@@ -127,11 +77,8 @@ export function sessionContextDrift({
   nowSelectedStoredId,
   submitTargetStoredId,
   composerScope,
-  submitTargetComposerScope,
-  pinOwner
+  submitTargetComposerScope
 }: SessionContextDriftArgs): string | null {
-  const activePins = pinOwner ? pinnedStoredSessionIdsForOwner(pinOwner) : NO_PINS
-
   // Composer prong: the composer's loaded scope disagrees with the resolved
   // submit target. Not a start/now comparison like the two prongs below — the
   // composer only hands us one snapshot per submit — but it belongs in the
@@ -150,12 +97,7 @@ export function sessionContextDrift({
   // (navigated to settings / a non-chat overlay route) or a search/hash-only
   // change (same target) is not drift, and neither is landing on the submit's
   // own target.
-  if (
-    targetNow !== targetStart &&
-    targetNow !== null &&
-    targetNow !== submitTargetStoredId &&
-    !(targetNow !== '__new__' && activePins.has(targetNow))
-  ) {
+  if (targetNow !== targetStart && targetNow !== null && targetNow !== submitTargetStoredId) {
     return `route:${targetStart}->${targetNow}`
   }
 
@@ -165,8 +107,7 @@ export function sessionContextDrift({
   if (
     nowSelectedStoredId !== null &&
     nowSelectedStoredId !== startSelectedStoredId &&
-    nowSelectedStoredId !== submitTargetStoredId &&
-    !activePins.has(nowSelectedStoredId)
+    nowSelectedStoredId !== submitTargetStoredId
   ) {
     return `selection:${startSelectedStoredId}->${nowSelectedStoredId}`
   }
