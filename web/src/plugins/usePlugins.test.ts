@@ -69,6 +69,11 @@ describe("plugin manifest cache helpers", () => {
     expect(getCachedManifests()).toBeNull();
   });
 
+  it("getCachedManifests returns null for scalar JSON", () => {
+    storage.setItem(MANIFEST_CACHE_KEY, JSON.stringify(42));
+    expect(getCachedManifests()).toBeNull();
+  });
+
   it("getCachedManifests returns a valid manifest array", () => {
     const list: PluginManifest[] = [exampleManifest];
     cacheManifests(list);

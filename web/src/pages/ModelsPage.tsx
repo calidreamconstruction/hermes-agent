@@ -14,7 +14,6 @@ import {
   Zap,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { auxTaskLabel, auxTaskRows } from "@/lib/aux-tasks";
 import type {
   AuxiliaryModelsResponse,
   AuxiliaryTaskAssignment,
@@ -29,7 +28,7 @@ import {
   DASHBOARD_MODAL_PANEL,
   shouldCloseOuterModalOnEscape,
 } from "@/lib/dashboard-modal-shell";
-import { compactNumber } from "@hermes/shared";
+import { formatTokenCount } from "@/lib/format";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Stats } from "@nous-research/ui/ui/components/stats";
@@ -43,13 +42,26 @@ import { useI18n } from "@/i18n";
 import { PluginSlot } from "@/plugins";
 import { ModelPickerDialog } from "@/components/ModelPickerDialog";
 import { ModelReloadConfirm } from "@/components/ModelReloadConfirm";
-import { errorMessage } from "@/lib/api-error";
-import { assignmentToPickerCurrent } from "@/lib/model-picker-current";
 
 const PERIODS = [
   { label: "7d", days: 7 },
   { label: "30d", days: 30 },
   { label: "90d", days: 90 },
+] as const;
+
+// Must match _AUX_TASK_SLOTS in hermes_cli/web_server.py.
+const AUX_TASKS: readonly { key: string; label: string; hint: string }[] = [
+  { key: "vision", label: "Vision", hint: "Image analysis" },
+  { key: "web_extract", label: "Web Extract", hint: "Page summarization" },
+  { key: "compression", label: "Compression", hint: "Context compaction" },
+  { key: "skills_hub", label: "Skills Hub", hint: "Skill search" },
+  { key: "approval", label: "Approval", hint: "Smart auto-approve" },
+  { key: "mcp", label: "MCP", hint: "MCP tool routing" },
+  { key: "title_generation", label: "Title Gen", hint: "Session titles" },
+  { key: "triage_specifier", label: "Triage Specifier", hint: "Kanban spec fleshing" },
+  { key: "kanban_decomposer", label: "Kanban Decomposer", hint: "Task decomposition" },
+  { key: "profile_describer", label: "Profile Describer", hint: "Auto profile descriptions" },
+  { key: "curator", label: "Curator", hint: "Skill-usage review" },
 ] as const;
 
 function formatTokens(n: number): string {
@@ -194,7 +206,6 @@ function UseAsMenu({
   model,
   isMain,
   mainAuxTask,
-  auxTasks,
   onAssigned,
 }: {
   provider: string;
@@ -203,8 +214,6 @@ function UseAsMenu({
   isMain: boolean;
   /** If this model is assigned to a specific aux task, that task's key. */
   mainAuxTask: string | null;
-  /** Auxiliary rows as served (built-ins + plugin tasks); see auxTaskRows. */
-  auxTasks: AuxiliaryTaskAssignment[];
   onAssigned(): void;
 }) {
   const [open, setOpen] = useState(false);
@@ -248,7 +257,7 @@ function UseAsMenu({
       onAssigned();
       setOpen(false);
     } catch (e) {
-      setError(errorMessage(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -309,7 +318,7 @@ function UseAsMenu({
             <span>All auxiliary tasks</span>
           </button>
 
-          {auxTaskRows(auxTasks).map((t) => (
+          {AUX_TASKS.map((t) => (
             <button
               key={t.key}
               type="button"
@@ -421,12 +430,12 @@ function ModelCard({
               )}
               {caps.context_window && caps.context_window > 0 && (
                 <span className="text-xs text-text-secondary">
-                  {compactNumber(caps.context_window)} ctx
+                  {formatTokenCount(caps.context_window)} ctx
                 </span>
               )}
               {caps.max_output_tokens && caps.max_output_tokens > 0 && (
                 <span className="text-xs text-text-secondary">
-                  {compactNumber(caps.max_output_tokens)} out
+                  {formatTokenCount(caps.max_output_tokens)} out
                 </span>
               )}
             </div>
@@ -458,7 +467,6 @@ function ModelCard({
               model={entry.model}
               isMain={isMain}
               mainAuxTask={mainAuxTask}
-              auxTasks={aux}
               onAssigned={onAssigned}
             />
           </div>
@@ -619,15 +627,10 @@ function AuxiliaryTasksModal({
         </header>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-1">
-          {auxTaskRows(aux?.tasks).map((t) => {
+          {AUX_TASKS.map((t) => {
             const cur = aux?.tasks.find((a) => a.task === t.key);
             const isAuto =
               !cur || cur.provider === "auto" || !cur.provider;
-            const eff = cur?.effective;
-            const effRoute =
-              eff?.provider && eff.provider !== "auto"
-                ? `${eff.provider} · ${eff.model || "(provider default)"}`
-                : "auto (use main model)";
             return (
               <div
                 key={t.key}
@@ -641,31 +644,11 @@ function AuxiliaryTasksModal({
                     </span>
                   </div>
                   <div className="text-xs font-mono text-text-secondary truncate">
-                    {isAuto && t.inheritFrom
-                      ? `inherits ${auxTaskLabel(aux?.tasks, t.inheritFrom)} · ${effRoute}`
-                      : isAuto
-                        ? "auto (use main model)"
-                        : `${cur?.provider} · ${cur?.model || "(provider default)"}`}
+                    {isAuto
+                      ? "auto (use main model)"
+                      : `${cur?.provider} · ${cur?.model || "(provider default)"}`}
                   </div>
                 </div>
-                {t.inheritFrom && !isAuto && (
-                  <Button
-                    size="sm"
-                    outlined
-                    onClick={async () => {
-                      await api.setModelAssignment({
-                        scope: "auxiliary",
-                        task: t.key,
-                        provider: "auto",
-                        model: "",
-                      });
-                      onSaved();
-                    }}
-                    className="h-6 text-xs uppercase"
-                  >
-                    Follow {auxTaskLabel(aux?.tasks, t.inheritFrom)}
-                  </Button>
-                )}
                 <Button
                   size="sm"
                   outlined
@@ -684,10 +667,10 @@ function AuxiliaryTasksModal({
             key={`picker-${refreshKey}`}
             loader={api.getModelOptions}
             alwaysGlobal
-            currentAssignment={assignmentToPickerCurrent(
-              aux?.tasks.find((a) => a.task === picker.task),
-            )}
-            title={`Set Auxiliary: ${auxTaskLabel(aux?.tasks, picker.task)}`}
+            title={`Set Auxiliary: ${
+              AUX_TASKS.find((t) => t.key === picker.task)?.label ??
+              picker.task
+            }`}
             onApply={async ({ provider, model, confirmExpensiveModel }) => {
               const result = await api.setModelAssignment({
                 confirm_expensive_model: confirmExpensiveModel,
@@ -768,7 +751,7 @@ function MoaModelsModal({
       onSaved(saved);
       onClose();
     } catch (e) {
-      setError(errorMessage(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -784,7 +767,7 @@ function MoaModelsModal({
       aggregator_temperature: draft.aggregator_temperature,
       reference_timeout: draft.reference_timeout,
       degraded_reference_policy: draft.degraded_reference_policy,
-
+      max_tokens: draft.max_tokens,
       enabled: draft.enabled,
     };
     setDraft((prev) => ({
@@ -921,11 +904,6 @@ function MoaModelsModal({
           key={`moa-picker-${refreshKey}-${selected}-${picker.kind}-${picker.kind === "reference" ? picker.index : "agg"}`}
           loader={api.getModelOptions}
           alwaysGlobal
-          currentAssignment={
-            picker.kind === "aggregator"
-              ? preset.aggregator
-              : preset.reference_models[picker.index]
-          }
           title="Select MoA Model"
           onApply={async ({ provider, model }) => {
             if ((provider || "").toLowerCase() === "moa") {
@@ -1001,7 +979,6 @@ function ModelSettingsPanel({
   const auxOverrideCount = aux?.tasks.filter(
     (a) => a.provider && a.provider !== "auto",
   ).length ?? 0;
-  const auxTaskCount = auxTaskRows(aux?.tasks).length;
 
   return (
     <Card className="min-w-0 max-w-full overflow-hidden">
@@ -1051,8 +1028,8 @@ function ModelSettingsPanel({
             </div>
             <div className="text-xs font-mono text-text-secondary truncate">
               {auxOverrideCount > 0
-                ? `${auxOverrideCount} override${auxOverrideCount > 1 ? "s" : ""} · ${auxTaskCount - auxOverrideCount} auto`
-                : `${auxTaskCount} tasks · all auto`}
+                ? `${auxOverrideCount} override${auxOverrideCount > 1 ? "s" : ""} · ${AUX_TASKS.length - auxOverrideCount} auto`
+                : `${AUX_TASKS.length} tasks · all auto`}
             </div>
           </div>
           <Button
@@ -1184,7 +1161,7 @@ export default function ModelsPage() {
         setData(models);
         setAux(auxData);
       })
-      .catch((err) => setError(errorMessage(err)))
+      .catch((err) => setError(String(err)))
       .finally(() => setLoading(false));
   }, [days]);
 

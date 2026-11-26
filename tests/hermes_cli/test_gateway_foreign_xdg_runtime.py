@@ -16,8 +16,6 @@ import pytest
 
 import hermes_cli.gateway as gateway_cli
 
-pytestmark = pytest.mark.platforms("linux")
-
 
 def _eacces(self):
     raise PermissionError(13, "Permission denied", str(self))
@@ -31,7 +29,13 @@ class TestPathExistsSafe:
         # A foreign /run/user/0/bus is unreadable, not "reachable".
         assert gateway_cli._path_exists_safe(Path("/run/user/0/bus")) is False
 
+    def test_returns_true_when_present(self, monkeypatch):
+        monkeypatch.setattr(Path, "exists", lambda self: True)
+        assert gateway_cli._path_exists_safe(Path("/run/user/1001/bus")) is True
 
+    def test_returns_false_when_absent(self, monkeypatch):
+        monkeypatch.setattr(Path, "exists", lambda self: False)
+        assert gateway_cli._path_exists_safe(Path("/run/user/1001/bus")) is False
 
 
 class TestRuntimeDirIsOurs:
@@ -123,7 +127,7 @@ class TestPreflightForeignRuntimeNoLeak:
         monkeypatch.setattr(gateway_cli, "_ensure_user_systemd_env", lambda: None)
         # Both socket paths resolve under the leaked /run/user/0 and are 0700 root.
         monkeypatch.setattr(Path, "exists", _eacces)
-        monkeypatch.setattr(gateway_cli, "get_systemd_linger_status", lambda username=None: (False, ""))
+        monkeypatch.setattr(gateway_cli, "get_systemd_linger_status", lambda: (False, ""))
         monkeypatch.setattr(gateway_cli.shutil, "which", lambda _: "/usr/bin/loginctl")
 
         class _Denied:

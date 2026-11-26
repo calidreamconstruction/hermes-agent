@@ -1,9 +1,8 @@
-import type { GatewayEvent, PersistedTurn } from '@hermes/shared'
 import type { QueryClient } from '@tanstack/react-query'
 import type { MutableRefObject } from 'react'
 
 import type { GatewayEventPayload } from '@/lib/chat-messages'
-import type { ErrorSurface } from '@/lib/error-surface'
+import type { RpcEvent } from '@/types/hermes'
 
 import type { ClientSessionState } from '../../../../types'
 
@@ -20,20 +19,10 @@ export interface GatewayEventDeps {
     text: string,
     responsePreviewed?: boolean,
     failure?: { error: string; partial: boolean },
-    occurredAt?: number,
-    persistedTurn?: PersistedTurn | null,
-    responseTransformed?: boolean,
-    status?: string,
-    responseReused?: boolean
+    occurredAt?: number
   ) => void
-  failAssistantMessage: (
-    sessionId: string,
-    errorMessage: string,
-    occurredAt?: number,
-    surface?: ErrorSurface | null
-  ) => void
+  failAssistantMessage: (sessionId: string, errorMessage: string, occurredAt?: number) => void
   flushQueuedDeltas: (sessionId?: string) => void
-  dropQueuedDeltas: (sessionId?: string) => void
   finalizeInterimAssistantMessage: (sessionId: string, text: string, occurredAt?: number) => void
   hydrateFromStoredSession: (
     attempts?: number,
@@ -63,7 +52,7 @@ export interface GatewayEventDeps {
  *  the routing preamble in index.ts computes it once per event. */
 export interface GatewayEventContext {
   deps: GatewayEventDeps
-  event: GatewayEvent
+  event: RpcEvent
   payload: GatewayEventPayload | undefined
   /** Routed session id (explicit, pinned unscoped stream, or active fallback). */
   sessionId: null | string
