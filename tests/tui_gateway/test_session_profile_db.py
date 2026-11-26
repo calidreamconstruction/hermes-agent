@@ -64,7 +64,8 @@ def server(hermes_home):
     mod._methods.clear()
     mod._methods.update(methods)
     mod._sessions.clear()
-    __import__("tui_gateway.server_requests", fromlist=["x"]).reset_for_tests()
+    mod._pending.clear()
+    mod._answers.clear()
     mod._db = None
 
 
@@ -239,7 +240,6 @@ def test_truncation_persists_to_the_profile_db(server, launch_db, profile_db, mo
             "truncate_before_row_id": user_row_ids[1],
             "truncate_before_user_ordinal": 1,
             "confirm_truncate": True,
-            "confirm_deep_truncate": True,  # cuts 2 of 3 user turns (#133716)
         },
     )
 
@@ -280,7 +280,6 @@ def test_truncation_does_not_copy_rows_into_the_launch_profile(
             "truncate_before_row_id": user_row_ids[1],
             "truncate_before_user_ordinal": 1,
             "confirm_truncate": True,
-            "confirm_deep_truncate": True,  # cuts 2 of 3 user turns (#133716)
         },
     )
 
@@ -292,14 +291,15 @@ def test_truncation_does_not_copy_rows_into_the_launch_profile(
     ]
 
 
-def test_truncation_surfaces_the_profile_dbs_live_row_ids(
+def test_truncation_surfaces_the_profile_dbs_new_row_ids(
     server, launch_db, profile_db, monkeypatch
 ):
-    """``survivor_user_row_ids`` must carry the profile db's live ids.
+    """``survivor_user_row_ids`` must carry the profile db's post-rewrite ids.
 
-    The client rebinds its cached stamps from this payload, so the ids have to
-    come from the db that did the rewrite. Since #82956 the kept prefix keeps its
-    rows (only the dropped suffix is archived), so those ids are the ORIGINAL ones.
+    ``replace_messages`` re-inserts the surviving prefix as NEW rows and the
+    client rebinds its cached stamps from this payload, so the ids have to come
+    from the db that actually did the rewrite. Ids minted anywhere else address
+    nothing in the profile's transcript, and the next rewind is refused 4018.
     """
     profile_home, pdb = profile_db
     user_row_ids: list = []
@@ -316,7 +316,6 @@ def test_truncation_surfaces_the_profile_dbs_live_row_ids(
             "truncate_before_row_id": user_row_ids[1],
             "truncate_before_user_ordinal": 1,
             "confirm_truncate": True,
-            "confirm_deep_truncate": True,  # cuts 2 of 3 user turns (#133716)
         },
     )
 
@@ -327,8 +326,8 @@ def test_truncation_surfaces_the_profile_dbs_live_row_ids(
         if row["role"] == "user"
     ]
     assert resp["result"]["survivor_user_row_ids"] == surviving
-    # The kept prefix keeps its rows: the pre-rewind id stays valid (#82956).
-    assert surviving == [user_row_ids[0]]
+    # Fresh rows, not the pre-rewind ids the client sent in.
+    assert user_row_ids[0] not in surviving
 
 
 def test_truncation_without_a_profile_uses_the_shared_handle(server, launch_db, monkeypatch):
@@ -346,7 +345,6 @@ def test_truncation_without_a_profile_uses_the_shared_handle(server, launch_db, 
             "truncate_before_row_id": user_row_ids[1],
             "truncate_before_user_ordinal": 1,
             "confirm_truncate": True,
-            "confirm_deep_truncate": True,  # cuts 2 of 3 user turns (#133716)
         },
     )
 

@@ -3,7 +3,7 @@
 from pathlib import Path
 import shutil
 
-import hermes_yaml as yaml
+import yaml
 
 from hermes_cli.plugins import PluginManager
 

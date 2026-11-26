@@ -1,18 +1,11 @@
-import { stripAnsi } from '@hermes/shared/ansi'
-
 import { type ToolTitleKey, translateNow } from '@/i18n'
 import { normalizeExternalUrl } from '@/lib/external-link'
-import { isFileMediaPath, mediaKind } from '@/lib/media'
 import { summarizeShellCommand } from '@/lib/summarize-command'
 import { capitalize, firstStringField, normalize } from '@/lib/text'
-import { CONNECTION_CARD_KEY, isCardTool, isFileEditTool, isSilentTool } from '@/lib/tool-render-class'
-import { envelopeErrorText, toolResultRecord } from '@/lib/tool-result-metadata'
+import { isCardTool, isFileEditTool, isSilentTool } from '@/lib/tool-render-class'
 import { extractToolErrorMessage, formatToolResultSummary } from '@/lib/tool-result-summary'
 
-import { skillActivityTitle } from '../skill-activity'
-
 import {
-  browserExecStepLabel,
   compactPreview,
   contextValue,
   formatDurationSeconds,
@@ -42,7 +35,7 @@ export * from './types'
 // The transcript's render budget prices a turn by the same classification, so
 // it lives in `@/lib/tool-render-class` where both sides can reach it without
 // pulling this module's formatting/i18n weight into the cost path.
-export { CONNECTION_CARD_KEY, isCardTool, isFileEditTool, isSilentTool }
+export { isCardTool, isFileEditTool, isSilentTool }
 
 export interface DiffLineStats {
   added: number
@@ -206,14 +199,6 @@ const TOOL_META: Record<ToolTitleKey, ToolMetaSpec> = {
     icon: 'search',
     tone: 'agent'
   },
-  setup_choose: {
-    icon: 'question',
-    tone: 'agent'
-  },
-  start_chat: {
-    icon: 'comment',
-    tone: 'agent'
-  },
   terminal: {
     icon: 'terminal',
     tone: 'terminal'
@@ -362,7 +347,6 @@ const DEFAULT_COUNT_NOUN_BY_TOOL: Record<string, string> = {
   search_files: 'result',
   session_search_recall: 'result',
   todo: 'todo',
-  todo_list: 'todo',
   web_search: 'result'
 }
 
@@ -671,12 +655,11 @@ function toolErrorText(part: ToolPart, result: Record<string, unknown>): string 
   const extractedError = extractToolErrorMessage(part.result)
 
   if (part.isError) {
-    return (
-      extractedError ||
-      envelopeErrorText(part.toolResultMetadata) ||
-      (typeof part.result === 'string' && part.result.trim()) ||
-      'Tool returned an error.'
-    )
+    return extractedError || (typeof part.result === 'string' && part.result.trim()) || 'Tool returned an error.'
+  }
+
+  if (typeof result.error === 'string' && result.error.trim()) {
+    return result.error.trim()
   }
 
   if (extractedError) {
@@ -687,7 +670,7 @@ function toolErrorText(part: ToolPart, result: Record<string, unknown>): string 
     return firstStringField(result, ['message', 'reason', 'detail']) || 'Tool returned success=false.'
   }
 
-  if (typeof result.status === 'string' && /^(error|failed|failure|fatal|exception)$/i.test(result.status.trim())) {
+  if (typeof result.status === 'string' && /\b(error|failed|failure)\b/i.test(result.status)) {
     return firstStringField(result, ['message', 'reason', 'detail']) || `Tool returned status "${result.status}".`
   }
 
@@ -710,13 +693,8 @@ function toolErrorText(part: ToolPart, result: Record<string, unknown>): string 
 }
 
 function toolStatus(part: ToolPart, resultRecord: Record<string, unknown>): ToolStatus {
-  if (part.result === undefined && part.completedAt === undefined) {
+  if (part.result === undefined) {
     return 'running'
-  }
-
-  // A call the user stopped is expected to have no result; don't warn about it.
-  if (part.result === undefined && !part.isError) {
-    return part.interrupted ? 'notice' : 'warning'
   }
 
   // Explicit success wins over isError / nested-error heuristics. Memory writes
@@ -726,21 +704,8 @@ function toolStatus(part: ToolPart, resultRecord: Record<string, unknown>): Tool
     return 'success'
   }
 
-  const error = toolErrorText(part, resultRecord)
-
-  if (!error) {
+  if (!toolErrorText(part, resultRecord)) {
     return 'success'
-  }
-
-  // A guessed read path missing is routine exploration, not a broken tool.
-  // Keep the explanation available without a destructive alarm. Writes and
-  // permission failures deliberately do not take this path.
-  if (part.toolName === 'read_file' && /^File not found:/i.test(error)) {
-    return 'notice'
-  }
-
-  if (part.toolName === 'terminal' && error === 'Command failed with exit code 1.') {
-    return 'notice'
   }
 
   // A rejected memory write is a budget negotiation, not a failure: the store
@@ -759,30 +724,7 @@ function durationLabel(resultRecord: Record<string, unknown>): string | undefine
   return formatDurationSeconds(seconds)
 }
 
-const NON_DELIVERABLE_TOOLS = new Set([
-  'annotate_preview',
-  'drive_preview',
-  'gui_tour',
-  'list_files',
-  'read_file',
-  'search_files'
-])
-
 function toolPreviewTarget(toolName: string, args: Record<string, unknown>, result: Record<string, unknown>): string {
-  if (toolName === 'tool_call') {
-    const calls = Array.isArray(args.calls) ? args.calls : [args]
-    const call = parseMaybeObject(calls[0])
-
-    if (calls.length === 1 && typeof call.name === 'string') {
-      return toolPreviewTarget(call.name, parseMaybeObject(call.arguments), result)
-    }
-  }
-
-  // Reading an existing file is not producing a deliverable.
-  if (NON_DELIVERABLE_TOOLS.has(toolName) || (toolName === 'desktop_preview' && args.action !== 'open')) {
-    return ''
-  }
-
   const direct =
     firstStringField(result, ['preview', 'url', 'target']) ||
     firstStringField(args, ['preview', 'url', 'target', 'path', 'file', 'filepath']) ||
@@ -814,14 +756,18 @@ function toolImageUrl(args: Record<string, unknown>, result: Record<string, unkn
     return ''
   }
 
-  // Filesystem images are resolved by the activity renderer through the
-  // authenticated media pipeline before they reach an <img>. This matters for
-  // vision_analyze, whose input commonly lives on the local or remote gateway.
+  // Only inline-render images the renderer can actually fetch: data URLs or
+  // remote http(s). A bare filesystem path (e.g. vision_analyze's input image)
+  // resolves against the dev-server origin and 404s — fall back to the tool's
+  // codicon instead of a broken <img>.
   const isDataImage = candidate.toLowerCase().startsWith('data:image/')
   const isRemoteImage = /^https?:\/\//i.test(candidate) && /\.(png|jpe?g|gif|webp|bmp|svg)(\?|#|$)/i.test(candidate)
-  const isLocalImage = isFileMediaPath(candidate) && mediaKind(candidate) === 'image'
 
-  return isDataImage || isRemoteImage || isLocalImage ? candidate : ''
+  return isDataImage || isRemoteImage ? candidate : ''
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g'), '')
 }
 
 export function stripInlineDiffChrome(value: string): string {
@@ -1348,34 +1294,12 @@ function titlePartsFromAction(title: string, action?: string): ToolTitleParts {
   }
 }
 
-// A model-authored terminal `context`/`preview` sometimes already opens with
-// the verb the title template prepends ("Running grep …"), which renders as a
-// doubled "Running Running grep …". Drop a leading word that matches the action
-// we're about to prefix so the verb appears once.
-function withoutLeadingAction(value: string, action: string): string {
-  const verb = action.trim()
-  const text = value.trimStart()
-  const boundary = text.search(/\s/)
-
-  if (!verb || boundary < 0) {
-    return value
-  }
-
-  return text.slice(0, boundary).toLowerCase() === verb.toLowerCase() ? text.slice(boundary + 1).trimStart() : value
-}
-
 function dynamicTitle(
   part: ToolPart,
   args: Record<string, unknown>,
   result: Record<string, unknown>,
   fallback: ToolTitleParts
 ): ToolTitleParts {
-  const skillTitle = skillActivityTitle(part)
-
-  if (skillTitle) {
-    return { title: skillTitle }
-  }
-
   const verb = (gerund: string, past: string) => (part.result === undefined ? gerund : past)
 
   const titledAction = (action: string, title: string): ToolTitleParts =>
@@ -1453,22 +1377,9 @@ function dynamicTitle(
         translateNow(
           'assistant.tool.titleTemplates.actionCommand',
           action,
-          withoutLeadingAction(compactPreview(summarizeShellCommand(command), 160), action)
+          compactPreview(summarizeShellCommand(command), 160)
         )
       )
-    }
-  }
-
-  if (part.toolName === 'browser_exec') {
-    // The browser_exec schema asks the model to open `code` with a one-line
-    // `# …` comment describing the step in plain language; the CLI/TUI
-    // already surface it (agent/display.py). Mirror that here so desktop
-    // rows read "Searching Amazon for paper towels" instead of the generic
-    // "Browser Exec".
-    const label = browserExecStepLabel(firstStringField(args, ['code']))
-
-    if (label) {
-      return { title: label }
     }
   }
 
@@ -1483,20 +1394,9 @@ function dynamicTitle(
   return fallback
 }
 
-/** Status + detected preview target only — for feeds that never render the
- *  row (the live completion handler) and must not pay for titles/details. */
-export function toolPreviewOutcome(part: ToolPart): { previewTarget: string; status: ToolStatus } {
-  const resultRecord = toolResultRecord(part)
-
-  return {
-    previewTarget: toolPreviewTarget(part.toolName, parseMaybeObject(part.args), resultRecord),
-    status: toolStatus(part, resultRecord)
-  }
-}
-
 export function buildToolView(part: ToolPart, inlineDiff: string): ToolView {
   const argsRecord = parseMaybeObject(part.args)
-  const resultRecord = toolResultRecord(part)
+  const resultRecord = parseMaybeObject(part.result)
   const meta = toolMeta(part.toolName)
   const status = toolStatus(part, resultRecord)
   // Skip residual error-heuristic text once status is success (stale isError
@@ -1519,12 +1419,7 @@ export function buildToolView(part: ToolPart, inlineDiff: string): ToolView {
     titlePartsFromAction(baseTitle, part.result === undefined ? meta.pendingAction : undefined)
   )
 
-  const unavailable = part.result === undefined && part.completedAt !== undefined
-
-  const title = unavailable
-    ? translateNow(part.interrupted ? 'assistant.tool.resultInterrupted' : 'assistant.tool.resultUnavailable')
-    : titleParts.title
-
+  const title = titleParts.title
   const titleEnriched = title !== baseTitle
   const baseSubtitle = error || toolSubtitle(part, argsRecord, resultRecord)
 
@@ -1575,7 +1470,7 @@ export function buildToolView(part: ToolPart, inlineDiff: string): ToolView {
     icon: meta.icon,
     imageUrl: toolImageUrl(argsRecord, resultRecord),
     inlineDiff,
-    previewTarget: toolPreviewTarget(part.innerToolName || part.toolName, argsRecord, resultRecord),
+    previewTarget: toolPreviewTarget(part.toolName, argsRecord, resultRecord),
     rendersAnsi: rendersAnsi || undefined,
     searchQuery: searchQuery || undefined,
     searchHits: searchHits?.length ? searchHits : undefined,
@@ -1586,7 +1481,7 @@ export function buildToolView(part: ToolPart, inlineDiff: string): ToolView {
     status,
     subtitle,
     title,
-    titleAction: unavailable ? undefined : titleParts.action,
+    titleAction: titleParts.action,
     tone: meta.tone
   }
 }

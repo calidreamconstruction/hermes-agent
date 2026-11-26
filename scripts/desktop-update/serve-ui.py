@@ -13,30 +13,14 @@ disprove. Windows' in-process listener computes it the same way.
 
 import http.server
 import json
-import os
 import socketserver
 import sys
-import threading
 import time
 
 html_path, status_path = sys.argv[1], sys.argv[2]
 started_at = float(sys.argv[3]) if len(sys.argv) > 3 else time.time()
-owner_pid = int(sys.argv[4]) if len(sys.argv) > 4 else 0
 with open(html_path, "rb") as f:
     HTML = f.read()
-
-
-def exit_with_owner():
-    """Never outlive the hand-off: it ignores TERM/HUP, so a killed orchestrator
-    used to leave this server running on the old venv's python forever."""
-    while True:
-        time.sleep(2)
-        try:
-            os.kill(owner_pid, 0)  # windows-footgun: ok — posix.sh-only helper (Windows has its own listener)
-        except ProcessLookupError:
-            os._exit(0)
-        except OSError:
-            pass
 
 
 def progress_body():
@@ -53,7 +37,7 @@ def progress_body():
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
-    def log_message(self, format, *args):
+    def log_message(self, format, *args):  # noqa: A002 - base class signature
         pass
 
     def do_GET(self):
@@ -75,7 +59,5 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 with socketserver.TCPServer(("127.0.0.1", 0), Handler) as srv:
-    if owner_pid > 0:
-        threading.Thread(target=exit_with_owner, daemon=True).start()
     print(srv.server_address[1], flush=True)
     srv.serve_forever()

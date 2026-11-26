@@ -1,9 +1,12 @@
 import { resolveGatewayWsUrl } from '@hermes/shared'
 
-import type { OwnerScope } from '@/api/client'
 import { getApiRequestConnection, getApiRequestProfile, speakText } from '@/hermes'
-import { directTtsConfig, type DirectTtsConfig, synthesizeSpeechClientDirect } from '@/lib/voice-client-direct'
-import { RECONNECT_ATTEMPT_TIMEOUT_MS, withTimeout } from '@/lib/with-timeout'
+import {
+  cutSentences,
+  directTtsConfig,
+  type DirectTtsConfig,
+  synthesizeSpeechClientDirect
+} from '@/lib/voice-client-direct'
 import {
   $voicePlayback,
   setVoicePlaybackState,
@@ -11,7 +14,7 @@ import {
   type VoicePlaybackState
 } from '@/store/voice-playback'
 
-import { cutSentences, sanitizeTextForSpeech } from './speech-text'
+import { sanitizeTextForSpeech } from './speech-text'
 
 // Free Edge TTS occasionally hands back audio that never fires `playing`/`ended`
 // nor `error` — leaving voice mode stuck "speaking" forever. Reject if playback
@@ -20,16 +23,8 @@ import { cutSentences, sanitizeTextForSpeech } from './speech-text'
 const PLAYBACK_STALL_MS = 15_000
 
 let currentAudio: HTMLAudioElement | null = null
-// Every live playback registers its barge-in stop here: streaming sessions
-// (kill the WebSocket + AudioContext) and data-URL audio elements (cut
-// playback). A single slot cannot represent two overlapping playbacks — the
-// overwritten session keeps its socket open, keeps scheduling buffers, and
-// its audio resurfaces on a later turn (#91991). Draining the whole set keeps
-// stopVoicePlayback() deterministic no matter how playbacks overlap.
-const liveStops = new Set<() => void>()
+let currentStop: (() => void) | null = null
 let sequence = 0
-let claimTurnKey: string | null = null
-let inFlight: { done: Promise<boolean>; turnKey: string } | null = null
 
 // A shared, lazily-created AudioContext used only to nudge the browser's
 // autoplay state out of "suspended". A wake-word-started voice turn has no
@@ -75,31 +70,15 @@ function currentState(
   }
 }
 
-/** The speaking session's owner: a Bot chat synthesizes with its own
- *  profile's TTS voice, minted against the Bot's own connection. Omitted
- *  halves → the active (connection, profile). */
-export interface VoicePlaybackOptions extends OwnerScope {
+export interface VoicePlaybackOptions {
   messageId?: string | null
-  /** Skip the client-direct/stream rungs and POST straight to /api/audio/speak.
-   *  For callers whose stream path (client-direct, else WS relay) already
-   *  answered `fallback` this reply; the relay may not have been probed. */
-  syncOnly?: boolean
   source: VoicePlaybackSource
-  /** Stable across a live-id rewrite. A second start of this turn must not stop the first. */
-  turnKey?: string
 }
 
 export function stopVoicePlayback() {
-  inFlight = null
   sequence += 1
-
-  // Drain EVERY live playback, not just the newest. Each stop is idempotent
-  // and unregisters itself; the snapshot keeps the iteration safe.
-  for (const stop of [...liveStops]) {
-    stop()
-  }
-
-  liveStops.clear()
+  currentStop?.()
+  currentStop = null
 
   if (currentAudio) {
     currentAudio.pause()
@@ -125,7 +104,7 @@ export function stopVoicePlayback() {
 
 /** Exported for tests: the (connection, profile) routing contract below is
  *  exactly what broke in the desktop-remote voice report — keep it pinned. */
-export async function resolveSpeakStreamUrl(owner?: OwnerScope): Promise<null | string> {
+export async function resolveSpeakStreamUrl(): Promise<null | string> {
   const desktop = window.hermesDesktop
 
   if (!desktop?.getConnection) {
@@ -143,26 +122,13 @@ export async function resolveSpeakStreamUrl(owner?: OwnerScope): Promise<null | 
     // replies would synthesize with the local (often unconfigured) TTS
     // instead of the profile the user is actually talking to (#90051-adjacent
     // desktop-remote voice report, Aug 2026).
-    const profile = owner?.profile || getApiRequestProfile()
-    const connectionId = owner?.connectionId || getApiRequestConnection()
+    const profile = getApiRequestProfile()
+    const connectionId = getApiRequestConnection()
 
-    // Both awaits below are IPC round-trips into the main process with no
-    // timeout of their own (#93454) — a wedged main-process round-trip
-    // otherwise hangs voice mode's "speaking" state forever instead of
-    // falling back to playSpeechText. Bound the same way
-    // store/gateway's openSecondary bounds the same *For/plain pair.
     const conn =
       connectionId && desktop.getConnectionFor
-        ? await withTimeout(
-            desktop.getConnectionFor({ connectionId, profile }),
-            RECONNECT_ATTEMPT_TIMEOUT_MS,
-            `Timed out connecting to profile "${profile}"`
-          )
-        : await withTimeout(
-            desktop.getConnection(profile),
-            RECONNECT_ATTEMPT_TIMEOUT_MS,
-            `Timed out connecting to profile "${profile}"`
-          )
+        ? await desktop.getConnectionFor({ connectionId, profile })
+        : await desktop.getConnection(profile)
 
     const wsDeps =
       connectionId && desktop.getGatewayWsUrlFor
@@ -171,12 +137,7 @@ export async function resolveSpeakStreamUrl(owner?: OwnerScope): Promise<null | 
           ? {}
           : desktop
 
-    const wsUrl = await withTimeout(
-      resolveGatewayWsUrl(wsDeps, conn),
-      RECONNECT_ATTEMPT_TIMEOUT_MS,
-      `Timed out re-minting the gateway WebSocket URL for profile "${profile}"`
-    )
-
+    const wsUrl = await resolveGatewayWsUrl(wsDeps, conn)
     const url = new URL(wsUrl)
 
     if (!url.pathname.endsWith('/api/ws')) {
@@ -203,8 +164,6 @@ export async function resolveSpeakStreamUrl(owner?: OwnerScope): Promise<null | 
 export interface SpeechStreamSession {
   /** Feed more reply text as it streams in. Safe after `finish` (no-op). */
   append: (text: string) => void
-  /** Release a sealed bubble's tail without ending the turn (client-direct). */
-  flush?: () => void
   /** No more text coming — resolves `done` once the audio drains. */
   finish: () => void
   /**
@@ -235,12 +194,6 @@ function openClientDirectSpeechSession(tts: DirectTtsConfig, options: VoicePlayb
 
   let settle: (value: 'done' | 'fallback') => void = () => undefined
 
-  // stopVoicePlayback() → immediate barge-in: settle this session so its
-  // queued audio never resumes. Registered until settle, so a barge always
-  // reaches this session even while another playback is live alongside it
-  // (#91991).
-  const stop = () => settle(started ? 'done' : 'fallback')
-
   const done = new Promise<'done' | 'fallback'>(resolve => {
     settle = value => {
       if (settled) {
@@ -248,7 +201,7 @@ function openClientDirectSpeechSession(tts: DirectTtsConfig, options: VoicePlayb
       }
 
       settled = true
-      liveStops.delete(stop)
+      currentStop = null
 
       if (playing) {
         playing.pause()
@@ -260,7 +213,7 @@ function openClientDirectSpeechSession(tts: DirectTtsConfig, options: VoicePlayb
     }
   })
 
-  liveStops.add(stop)
+  currentStop = () => settle(started ? 'done' : 'fallback')
 
   const pump = async () => {
     if (synthesizing || settled) {
@@ -331,7 +284,7 @@ function openClientDirectSpeechSession(tts: DirectTtsConfig, options: VoicePlayb
   }
 
   const ingest = (flush: boolean) => {
-    const cut = cutSentences(buffer, flush, tts.min_len)
+    const cut = cutSentences(buffer, flush)
     buffer = cut.rest
 
     if (cut.sentences.length > 0) {
@@ -356,11 +309,6 @@ function openClientDirectSpeechSession(tts: DirectTtsConfig, options: VoicePlayb
       if (text && !finished && !settled) {
         buffer += text
         ingest(false)
-      }
-    },
-    flush: () => {
-      if (!finished && !settled) {
-        ingest(true)
       }
     },
     finish: () => {
@@ -394,12 +342,6 @@ function openSpeechStream(wsUrl: string, options: VoicePlaybackOptions): SpeechS
 
   let settle: (value: 'done' | 'fallback') => void = () => undefined
 
-  // stopVoicePlayback() → immediate barge-in: kill the socket (the server
-  // aborts synthesis on disconnect) and the audio context (cuts sound now).
-  // Registered until settle, so a barge always reaches this session even
-  // while another playback is live alongside it (#91991).
-  const stop = () => settle('done')
-
   const done = new Promise<'done' | 'fallback'>(resolve => {
     settle = value => {
       if (settled) {
@@ -407,7 +349,7 @@ function openSpeechStream(wsUrl: string, options: VoicePlaybackOptions): SpeechS
       }
 
       settled = true
-      liveStops.delete(stop)
+      currentStop = null
 
       try {
         ws.close()
@@ -431,7 +373,9 @@ function openSpeechStream(wsUrl: string, options: VoicePlaybackOptions): SpeechS
     }
   }
 
-  liveStops.add(stop)
+  // stopVoicePlayback() → immediate barge-in: kill the socket (the server
+  // aborts synthesis on disconnect) and the audio context (cuts sound now).
+  currentStop = () => settle('done')
 
   const finishWhenDrained = () => {
     const remainingMs = context ? Math.max(0, nextStartAt - context.currentTime) * 1_000 : 0
@@ -559,27 +503,16 @@ function openSpeechStream(wsUrl: string, options: VoicePlaybackOptions): SpeechS
  * `playSpeechText`).
  */
 export async function startSpeechStream(options: VoicePlaybackOptions): Promise<null | SpeechStreamSession> {
-  const startSequence = sequence
-
-  const direct = await directTtsConfig(options).catch(() => null)
+  const direct = await directTtsConfig().catch(() => null)
 
   if (direct) {
-    // A stop (barge-in, Stop button, another playback) landed while the
-    // direct TTS config was resolving — do not resurrect stopped playback.
-    if (sequence !== startSequence) {
-      return null
-    }
-
     stopVoicePlayback()
     setVoicePlaybackState(currentState('preparing', options))
 
     const session = openClientDirectSpeechSession(direct, options)
-    const sessionSequence = sequence
 
     void session.done.then(outcome => {
-      // A settled session must not reset the state of a NEWER playback —
-      // only write idle when no other playback started since this one.
-      if (outcome === 'done' && sessionSequence === sequence) {
+      if (outcome === 'done') {
         setVoicePlaybackState(currentState('idle'))
       }
     })
@@ -587,17 +520,9 @@ export async function startSpeechStream(options: VoicePlaybackOptions): Promise<
     return session
   }
 
-  const wsUrl = await resolveSpeakStreamUrl(options)
+  const wsUrl = await resolveSpeakStreamUrl()
 
   if (!wsUrl) {
-    return null
-  }
-
-  // A stop (barge-in, Stop button, another playback) landed while the
-  // stream URL was resolving — do not resurrect playback that was already
-  // stopped. This is the reported overlap (#91991): barge + next-turn open
-  // crossing the async discovery gap previously orphaned the older session.
-  if (sequence !== startSequence) {
     return null
   }
 
@@ -605,12 +530,9 @@ export async function startSpeechStream(options: VoicePlaybackOptions): Promise<
   setVoicePlaybackState(currentState('preparing', options))
 
   const session = openSpeechStream(wsUrl, options)
-  const sessionSequence = sequence
 
   void session.done.then(outcome => {
-    // A settled session must not reset the state of a NEWER playback — only
-    // write idle when no other playback started since this one was created.
-    if (outcome === 'done' && sessionSequence === sequence) {
+    if (outcome === 'done') {
       setVoicePlaybackState(currentState('idle'))
     }
   })
@@ -632,7 +554,7 @@ async function playSpeechDataUrl(
   options: VoicePlaybackOptions,
   isCurrent: () => boolean
 ): Promise<boolean> {
-  const response = await speakText(speakableText, options)
+  const response = await speakText(speakableText)
 
   if (!isCurrent()) {
     return false
@@ -645,13 +567,6 @@ async function playSpeechDataUrl(
   await new Promise<void>((resolve, reject) => {
     let stall: number | null = null
 
-    // Registered until cleanup so stopVoicePlayback() reaches this element
-    // even while a streaming session is live alongside it (#91991).
-    const stop = () => {
-      cleanup()
-      resolve()
-    }
-
     const cleanup = () => {
       if (stall !== null) {
         window.clearTimeout(stall)
@@ -661,7 +576,7 @@ async function playSpeechDataUrl(
       audio.removeEventListener('ended', onEnded)
       audio.removeEventListener('error', onError)
       audio.removeEventListener('timeupdate', armStall)
-      liveStops.delete(stop)
+      currentStop = null
     }
 
     const armStall = () => {
@@ -685,7 +600,10 @@ async function playSpeechDataUrl(
       reject(new Error('Playback failed'))
     }
 
-    liveStops.add(stop)
+    currentStop = () => {
+      cleanup()
+      resolve()
+    }
 
     audio.addEventListener('ended', onEnded, { once: true })
     audio.addEventListener('error', onError, { once: true })
@@ -716,36 +634,8 @@ async function playSpeechDataUrl(
 }
 
 export async function playSpeechText(text: string, options: VoicePlaybackOptions): Promise<boolean> {
-  if (options.turnKey && (claimTurnKey === options.turnKey || inFlight?.turnKey === options.turnKey)) {
-    return inFlight?.turnKey === options.turnKey ? inFlight.done : Promise.resolve(true)
-  }
+  stopVoicePlayback()
 
-  const previousClaim = claimTurnKey
-  claimTurnKey = options.turnKey ?? null
-
-  try {
-    stopVoicePlayback()
-
-    const done = startSpeechText(text, options)
-
-    if (options.turnKey) {
-      inFlight = { done, turnKey: options.turnKey }
-      void done.finally(() => {
-        if (inFlight?.done === done) {
-          inFlight = null
-        }
-      })
-    }
-
-    return done
-  } finally {
-    if (claimTurnKey === (options.turnKey ?? null)) {
-      claimTurnKey = previousClaim
-    }
-  }
-}
-
-async function startSpeechText(text: string, options: VoicePlaybackOptions): Promise<boolean> {
   const speakableText = sanitizeTextForSpeech(text)
 
   if (!speakableText) {
@@ -760,7 +650,7 @@ async function startSpeechText(text: string, options: VoicePlaybackOptions): Pro
   try {
     // Ladder: client-direct synthesis (profile's own TTS, no gateway audio
     // hop) → streaming WS relay → POST data-URL fallback.
-    const direct = options.syncOnly ? null : await directTtsConfig(options).catch(() => null)
+    const direct = await directTtsConfig().catch(() => null)
 
     if (direct && isCurrent()) {
       const session = openClientDirectSpeechSession(direct, options)
@@ -784,7 +674,7 @@ async function startSpeechText(text: string, options: VoicePlaybackOptions): Pro
       return false
     }
 
-    const streamUrl = options.syncOnly ? null : await resolveSpeakStreamUrl(options)
+    const streamUrl = await resolveSpeakStreamUrl()
 
     if (streamUrl && isCurrent()) {
       const outcome = await playSpeechStream(streamUrl, speakableText, options)
@@ -813,6 +703,7 @@ async function startSpeechText(text: string, options: VoicePlaybackOptions): Pro
     return played
   } catch (error) {
     if (isCurrent()) {
+      currentStop = null
       currentAudio = null
       setVoicePlaybackState(currentState('idle'))
     }

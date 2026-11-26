@@ -176,10 +176,9 @@ def which_binary() -> Optional[Path]:
                 try:
                     out = subprocess.run(
                         [str(p), "--version"],
-                        stdin=subprocess.DEVNULL, capture_output=True,
+                        capture_output=True,
                         text=True,
                         timeout=5,
-                        check=False,
                     )
                     if out.returncode != 0 or "ast-grep" not in (out.stdout + out.stderr).lower():
                         continue
@@ -394,10 +393,9 @@ def run_sg(
     try:
         return subprocess.run(
             cmd,
-            stdin=subprocess.DEVNULL, capture_output=capture,
+            capture_output=capture,
             text=True,
             timeout=timeout,
-            check=False,
         )
     except subprocess.TimeoutExpired:
         err(f"ast-grep call timed out after {timeout}s")
@@ -607,8 +605,7 @@ def cmd_install(_args: argparse.Namespace) -> int:
         err(f"installer not found: {installer}")
         return 1
     trace(f"running installer: {' '.join(cmd)}")
-    # health: allow HX006 -- the installer downloads a release; its duration depends on the network
-    return subprocess.run(cmd, stdin=subprocess.DEVNULL, check=False).returncode
+    return subprocess.run(cmd).returncode
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
@@ -753,7 +750,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         parser.error(f"unrecognized arguments: {' '.join(bad)}")
     if extras:
         if hasattr(args, "paths"):
-            args.paths = list(args.paths or []) + extras
+            args.paths = list(getattr(args, "paths") or []) + extras
         else:
             parser.error(f"unrecognized arguments: {' '.join(extras)}")
     _QUIET = bool(getattr(args, "quiet", False))

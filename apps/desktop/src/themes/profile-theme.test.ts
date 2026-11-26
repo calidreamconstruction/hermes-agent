@@ -46,31 +46,21 @@ describe.each(cases)('per-profile $name', ({ pref, fallback, a, b, junk }) => {
     expect(pref.resolve('work')).toBe(fallback)
   })
 })
-// #101216: named-profile assign must seed the global fallback so a Bot Mode
-// gateway hop onto a never-themed bot does not resolve `system`.
-describe('named-profile appearance seeds the global fallback (#101216)', () => {
+
+// A fresh profile follows the OS. This defaulted to `light`, so a dark-mode
+// desktop got a white window on first launch — and, once translucency became
+// per-appearance, light's much heavier tint along with it. Main already
+// defaulted its own themeSource to 'system', so the two disagreed at boot.
+describe('a profile that has never chosen a mode', () => {
   beforeEach(() => window.localStorage.clear())
 
-  it('lets a never-themed bot profile inherit Dark set on the launch profile', () => {
-    modePref.assign('forge', 'dark')
-    expect(modePref.resolve('atlas')).toBe('dark')
+  it('follows the OS rather than forcing light', () => {
+    expect(modePref.resolve('default')).toBe('system')
+    expect(modePref.resolve('work')).toBe('system')
   })
 
-  it('keeps an explicit per-profile override over the global fallback', () => {
-    modePref.assign('forge', 'dark')
-    modePref.assign('atlas', 'light')
-    expect(modePref.resolve('forge')).toBe('dark')
-    expect(modePref.resolve('atlas')).toBe('light')
-  })
-
-  it('lets a never-themed profile inherit the last named-profile assign', () => {
-    modePref.assign('forge', 'dark')
-    modePref.assign('atlas', 'light')
-    expect(modePref.resolve('never-themed')).toBe('light')
-  })
-
-  it('promotes a unanimous pre-existing per-profile mode into the empty global slot', () => {
-    window.localStorage.setItem('hermes-desktop-profile-modes-v1', JSON.stringify({ forge: 'dark' }))
-    expect(modePref.resolve('atlas')).toBe('dark')
+  it('still honours an explicit choice', () => {
+    modePref.assign('default', 'light')
+    expect(modePref.resolve('default')).toBe('light')
   })
 })

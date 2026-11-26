@@ -2,7 +2,7 @@ import { atom, computed } from 'nanostores'
 
 import { keyedTimeouts } from '@/lib/keyed-timeouts'
 import { stableRecord } from '@/lib/stable-array'
-import { parseTodoRevision, parseTodos, type TodoItem } from '@/lib/todos'
+import type { TodoItem } from '@/lib/todos'
 
 import { $sessions, lineageAliases } from './session'
 import { $sessionStates } from './session-states'
@@ -17,9 +17,6 @@ import { $sessionStates } from './session-states'
  *   above the composer forever.
  */
 export const $todosBySession = atom<Record<string, TodoItem[]>>({})
-export const $todoRevisionsBySession = atom<Record<string, number>>({})
-/** Last authoritative snapshot, separate from the transient live panel. */
-export const $retainedTodosBySession = atom<Record<string, TodoItem[]>>({})
 
 export const todoListActive = (todos: readonly TodoItem[]) =>
   todos.some(t => t.status === 'pending' || t.status === 'in_progress')
@@ -72,101 +69,30 @@ export function todosForHydration(todos: readonly TodoItem[] | null): TodoItem[]
 const FINISHED_LINGER_MS = 4_000
 const clearTimers = keyedTimeouts()
 
-const hasSessionTodos = (map: Record<string, TodoItem[]>, sid: string): boolean => Object.hasOwn(map, sid)
-
-const getSessionTodos = (map: Record<string, TodoItem[]>, sid: string): TodoItem[] | undefined =>
-  hasSessionTodos(map, sid) ? map[sid] : undefined
-
-function acceptRevision(sid: string, revision?: null | number): boolean {
-  const revisions = $todoRevisionsBySession.get()
-  const current = revisions[sid]
-
-  // tool.start has no revision. Apply the merge locally and leave the
-  // watermark alone so a later todo.updated / tool.complete can still win.
-  if (revision == null) {
-    return true
-  }
-
-  if (current != null && revision < current) {
-    return false
-  }
-
-  if (current !== revision) {
-    $todoRevisionsBySession.set({ ...revisions, [sid]: revision })
-  }
-
-  return true
-}
-
-function retainSessionTodos(sid: string, todos: TodoItem[]) {
-  const current = $retainedTodosBySession.get()
-
-  if (todos.length) {
-    $retainedTodosBySession.set({ ...current, [sid]: todos })
-  } else if (sid in current) {
-    const { [sid]: _drop, ...rest } = current
-    $retainedTodosBySession.set(rest)
-  }
-}
-
-export function setSessionTodos(sid: string, todos: TodoItem[], revision?: null | number) {
+export function setSessionTodos(sid: string, todos: TodoItem[]) {
   if (!sid) {
     return
-  }
-
-  if (!acceptRevision(sid, revision)) {
-    return
-  }
-
-  // An unversioned tool.start is optimistic, not a durable result.
-  if (revision != null) {
-    retainSessionTodos(sid, todos)
   }
 
   clearTimers.cancel(sid)
   $todosBySession.set({ ...$todosBySession.get(), [sid]: todos })
 
   if (!todoListActive(todos)) {
-    clearTimers.schedule(sid, FINISHED_LINGER_MS, () => dropSessionTodos(sid, false))
-  }
-}
-
-function dropSessionTodos(sid: string, forgetRevision: boolean) {
-  clearTimers.cancel(sid)
-
-  const map = $todosBySession.get()
-
-  if (hasSessionTodos(map, sid)) {
-    const { [sid]: _drop, ...rest } = map
-    $todosBySession.set(rest)
-  }
-
-  if (forgetRevision) {
-    const revisions = $todoRevisionsBySession.get()
-
-    if (Object.hasOwn(revisions, sid)) {
-      const { [sid]: _drop, ...rest } = revisions
-      $todoRevisionsBySession.set(rest)
-    }
-
-    retainSessionTodos(sid, [])
+    clearTimers.schedule(sid, FINISHED_LINGER_MS, () => clearSessionTodos(sid))
   }
 }
 
 export function clearSessionTodos(sid: string) {
-  dropSessionTodos(sid, true)
-}
+  clearTimers.cancel(sid)
 
-export function clearAllSessionTodos() {
-  const ids = new Set([
-    ...Object.keys($todosBySession.get()),
-    ...Object.keys($todoRevisionsBySession.get()),
-    ...Object.keys($retainedTodosBySession.get())
-  ])
+  const map = $todosBySession.get()
 
-  for (const sid of ids) {
-    clearSessionTodos(sid)
+  if (!(sid in map)) {
+    return
   }
+
+  const { [sid]: _drop, ...rest } = map
+  $todosBySession.set(rest)
 }
 
 // Drop a still-active todo list (any pending/in_progress item) — used at turn
@@ -175,43 +101,11 @@ export function clearAllSessionTodos() {
 // composer forever. A finished list is left untouched so its short linger
 // still shows the last checkmark landing.
 export function clearActiveSessionTodos(sid: string) {
-  const todos = getSessionTodos($todosBySession.get(), sid)
+  const todos = $todosBySession.get()[sid]
 
   if (!todos || !todoListActive(todos)) {
     return
   }
 
-  dropSessionTodos(sid, false)
-}
-
-/** Apply a session.resume/activate or todo.updated full snapshot. Idle
- * sessions keep the existing stale-active guard; running sessions restore the
- * active plan because the backend has proved that turn is still live. */
-export function restoreSessionTodosFromSnapshot(sid: string, snapshot: unknown, running: boolean) {
-  const todos = parseTodos(snapshot)
-
-  if (!sid || todos === null) {
-    return
-  }
-
-  const revision = parseTodoRevision(snapshot)
-
-  // An unused store serializes as {todos: [], revision: 0}. That is not a
-  // real snapshot. Applying it would stamp watermark 0 and leave an empty
-  // list in the map.
-  if (todos.length === 0 && (revision == null || revision === 0)) {
-    return
-  }
-
-  const visible = running ? todos : todosForHydration(todos)
-
-  if (visible !== null) {
-    setSessionTodos(sid, visible, revision)
-  } else if (acceptRevision(sid, revision)) {
-    if (revision != null) {
-      retainSessionTodos(sid, todos)
-    }
-
-    dropSessionTodos(sid, false)
-  }
+  clearSessionTodos(sid)
 }
