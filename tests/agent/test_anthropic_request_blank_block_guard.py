@@ -13,7 +13,10 @@ list, and the system-block path coerces blanks at extraction time (a blank block
 carrying a cache_control breakpoint cannot be dropped).
 Ref #69512 / #70909 (follow-up: request-level guard, not just per-message).
 """
-from agent.anthropic_message_convert import _EMPTY_TEXT_PLACEHOLDER, convert_messages_to_anthropic
+from agent.anthropic_adapter import (
+    _EMPTY_TEXT_PLACEHOLDER,
+    convert_messages_to_anthropic,
+)
 
 
 def _all_text_blocks(messages):
@@ -92,7 +95,7 @@ def test_real_text_is_left_untouched():
     messages = [
         {"role": "user", "content": "what is 2+2?"},
     ]
-    _system, result = convert_messages_to_anthropic(messages)
+    system, result = convert_messages_to_anthropic(messages)
     # Content may be a plain string or a list of blocks; collect text either way.
     texts = []
     for m in result:

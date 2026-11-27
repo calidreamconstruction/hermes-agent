@@ -24,6 +24,7 @@ def test_bare_hatch_uses_thread_aware_prompt_not_raw_input(capsys):
 
     def fake_prompt(prompt_text):
         calls.append(prompt_text)
+        return None  # helper cancelled (e.g. unsafe thread context)
 
     stand_in = _StandIn(_prompt_text_input=fake_prompt)
 
@@ -34,3 +35,5 @@ def test_bare_hatch_uses_thread_aware_prompt_not_raw_input(capsys):
         CLICommandsMixin._handle_hatch_command(stand_in, "/hatch")
 
     assert calls, "expected /hatch to route through _prompt_text_input"
+    out = capsys.readouterr().out
+    assert "Usage: /hatch" in out  # cancelled prompt falls through to usage

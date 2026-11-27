@@ -29,6 +29,11 @@ class TestLogLevelMap:
                     "error", "critical", "alert", "emergency"):
             assert lvl in _MCP_LOG_LEVEL_MAP
 
+    def test_severity_ordering(self):
+        assert _MCP_LOG_LEVEL_MAP["debug"] == logging.DEBUG
+        assert _MCP_LOG_LEVEL_MAP["notice"] == logging.INFO
+        assert _MCP_LOG_LEVEL_MAP["warning"] == logging.WARNING
+        assert _MCP_LOG_LEVEL_MAP["emergency"] == logging.ERROR
 
 
 class TestLoggingCallback:
@@ -39,7 +44,7 @@ class TestLoggingCallback:
         with caplog.at_level(logging.INFO, logger="tools.mcp_tool"):
             await callback(_params(level="info", data="server started"))
         assert any(
-            "log_srv" in rec.getMessage() and "server started" in rec.getMessage()
+            "MCP server log [log_srv]: server started" in rec.getMessage()
             for rec in caplog.records
         )
 
@@ -51,7 +56,7 @@ class TestLoggingCallback:
             await callback(_params(level="warning", data="rate limited",
                                    logger_name="http"))
         assert any(
-            "log_srv/http" in rec.getMessage() and "rate limited" in rec.getMessage()
+            "MCP server log [log_srv/http]: rate limited" in rec.getMessage()
             and rec.levelno == logging.WARNING
             for rec in caplog.records
         )

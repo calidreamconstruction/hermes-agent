@@ -16,7 +16,6 @@ export type SidebarActions = Pick<
   | 'onDeleteSession'
   | 'onLoadMoreMessaging'
   | 'onLoadMoreSessions'
-  | 'onRetrySessions'
   | 'onManageCronJob'
   | 'onNavigate'
   | 'onNewSessionInWorkspace'
@@ -32,7 +31,7 @@ export type ChatActions = Pick<
   | 'onAddUrl'
   | 'onAttachDroppedItems'
   | 'onAttachImageBlob'
-  | 'onAttachPastedText'
+  | 'onAttachPrCommentUrl'
   | 'onBranchInNewChat'
   | 'onCancel'
   | 'onDeleteSelectedSession'
@@ -47,7 +46,6 @@ export type ChatActions = Pick<
   | 'onRestoreToMessage'
   | 'onRetryResume'
   | 'onSteer'
-  | 'onSteerHidden'
   | 'onSubmit'
   | 'onThreadMessagesChange'
   | 'onToggleSelectedPin'
@@ -61,9 +59,6 @@ export type ChatActions = Pick<
  * the latest closure.
  */
 export interface WiringActions extends SidebarActions, ChatActions {
-  /** Re-home a chat's workspace: the primary's, or `sessionId` (a focused tile's runtime id). */
-  changeSessionCwd: (cwd: string, sessionId?: string) => Promise<void>
-  followDefaultModel: () => void
   /** Imperative access to the live gateway for controller-owned callbacks.
    *  Rendered surfaces subscribe to the active `$gateway` atom directly. */
   getGateway: () => ComponentProps<typeof ChatView>['gateway']

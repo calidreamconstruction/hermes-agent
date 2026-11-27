@@ -6,6 +6,7 @@ print a one-line error and exit 1 instead.
 """
 
 from argparse import Namespace
+from pathlib import Path
 
 import pytest
 
@@ -33,4 +34,5 @@ def test_backup_unwritable_parent_errors_cleanly(tmp_path, monkeypatch, capsys):
 
     assert exc.value.code == 1
     out = capsys.readouterr().out
+    assert "cannot write backup" in out.lower()
     assert "Traceback" not in out
