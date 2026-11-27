@@ -1,4 +1,4 @@
-# mac:/Users/faressystem/hermes-agent excluded-from-commit files (t1812, 2026-11-26 19:20 PST); path	bytes	sha256	reason
+# mac:/Users/faressystem/hermes-agent excluded-from-commit files (t1812, 2026-11-26 19:54 PST); path	bytes	sha256	reason
 .cache/desktop-inputs/packager/electron/3978a3c4a2965533dc07f99112894e7e7f80c9ea0f13e2a48cd5a29593568fb2/electron-v40.10.2-darwin-arm64.zip	114344775	e889b35e399f374f5dca932195287b373c4b43f8bf242e50c35f88a751511a13	excl:state/log/cache dir
 .swarm/memory.db	172032	2b11707d3369ff82bf0ed562dcb924b59f83ff9a55654af5278dcbe44f93c800	excl:db
 .swarm/memory.db-shm	32768	fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb	excl:db
