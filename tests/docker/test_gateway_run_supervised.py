@@ -67,7 +67,6 @@ def _wait_for_gateway_or_exit(
         r = subprocess.run(
             ["docker", "inspect", "-f", "{{.State.Status}}", container],
             capture_output=True, text=True, timeout=10,
-            check=False,
         )
         status = r.stdout.strip()
         if status == "exited":
@@ -120,6 +119,9 @@ def test_gateway_run_redirects_to_supervised(
     assert "s6 supervision" in logs, (
         f"expected loud breadcrumb in docker logs; got:\n{logs}"
     )
+    assert "--no-supervise" in logs, (
+        f"breadcrumb missing opt-out hint; got:\n{logs}"
+    )
 
     # Container should still be running. If the redirect didn't fire,
     # the foreground gateway would have crashed and the container
@@ -127,7 +129,6 @@ def test_gateway_run_redirects_to_supervised(
     r = subprocess.run(
         ["docker", "inspect", "-f", "{{.State.Status}}", container_name],
         capture_output=True, text=True, timeout=10,
-        check=False,
     )
     assert r.returncode == 0 and r.stdout.strip() == "running", (
         f"container exited prematurely: {r.stdout!r}; "

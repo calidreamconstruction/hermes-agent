@@ -7,12 +7,12 @@ import sys
 from pathlib import Path
 
 import pytest
-import hermes_yaml as yaml
+import yaml
 
 WORKTREE = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(WORKTREE))
 
-pytestmark = pytest.mark.platforms("windows")
+pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="live Windows E2E")
 
 
 def test_fleet_config_migration_live_windows(tmp_path, monkeypatch):
@@ -31,7 +31,7 @@ def test_fleet_config_migration_live_windows(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("HERMES_HOME", str(active))
 
-    from hermes_cli import update_cmd
+    import hermes_cli.update_cmd as update_cmd
     from hermes_cli.config import DEFAULT_CONFIG
 
     latest = int(DEFAULT_CONFIG["_config_version"])

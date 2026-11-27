@@ -26,30 +26,11 @@ from pathlib import Path
 
 import pytest
 
-from tests.live_process_fixtures import SLEEPER_MARKER, sleeper_script_path
-
-pytestmark = pytest.mark.platforms("windows")
+pytestmark = pytest.mark.skipif(
+    sys.platform != "win32", reason="live Windows lifecycle E2E"
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-
-def _wait_until(predicate, timeout: float = 15.0, interval: float = 0.05) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(interval)
-    return bool(predicate())
-
-
-def _argv_visible(pid: int, marker: str) -> bool:
-    """True once the process table shows *pid* with *marker* in its argv."""
-    import psutil
-
-    try:
-        return marker in " ".join(psutil.Process(pid).cmdline())
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        return False
 
 
 @pytest.fixture()
@@ -58,12 +39,13 @@ def sleeper():
 
     def _spawn(*tail: str) -> subprocess.Popen:
         p = subprocess.Popen(
-            [sys.executable, sleeper_script_path(), *tail],
+            [sys.executable, "-c", "import time; time.sleep(120)", *tail],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
         procs.append(p)
-        assert _wait_until(lambda: _argv_visible(p.pid, SLEEPER_MARKER)), "sleeper argv never visible"
+        time.sleep(0.5)
+        assert p.poll() is None
         return p
 
     yield _spawn
@@ -118,7 +100,8 @@ def test_live_supervised_serve_suppresses_cold_start(sleeper, monkeypatch, tmp_p
     # Dead serve → ownership drops → plan returns.
     serve.kill()
     serve.wait()
-    assert _wait_until(lambda: update_cmd._desktop_owns_gateway_lifecycle() is False)
+    time.sleep(0.5)
+    assert update_cmd._desktop_owns_gateway_lifecycle() is False
     token = update_cmd._pause_windows_gateways_for_update()
     assert token is not None and token.get("cold_start_if_installed") is True
 
@@ -135,29 +118,27 @@ def test_holder_scan_fallback_respects_token_classifier(sleeper, monkeypatch, tm
     # Lookalike from the #90778 class — must NOT confer ownership.
     kanban_like = sleeper("-m", "hermes_cli.main", "kanban", "--preserve-cache")
 
-    import psutil
+    def fake_holders():
+        import psutil
 
-    # Snapshot both holder rows while both processes are alive. Building the
-    # kanban row later (after the serve kill) would re-read the dead serve pid,
-    # raise NoSuchProcess and hand the fallback an empty scan, which returns
-    # False without ever reaching the token classifier.
-    serve_row, kanban_row = (
-        (p.pid, psutil.Process(p.pid).name(), " ".join(psutil.Process(p.pid).cmdline()))
-        for p in (serve_like, kanban_like)
-    )
-    assert "--preserve-cache" in kanban_row[2]
+        out = []
+        for p in (serve_like, kanban_like):
+            proc = psutil.Process(p.pid)
+            out.append((p.pid, proc.name(), " ".join(proc.cmdline())))
+        return out
 
     monkeypatch.setattr(
-        "hermes_cli.main._detect_venv_python_processes", lambda: [serve_row, kanban_row]
+        "hermes_cli.main._detect_venv_python_processes", fake_holders
     )
+
     # serve-shaped holder with a live parent (us) → owns
     assert update_cmd._desktop_owns_gateway_lifecycle() is True
 
-    # Only the (still live) kanban lookalike left → classifier rejects → does not own
+    # Only the kanban lookalike left → classifier rejects → does not own
     serve_like.kill()
     serve_like.wait()
-    assert kanban_like.poll() is None
     monkeypatch.setattr(
-        "hermes_cli.main._detect_venv_python_processes", lambda: [kanban_row]
+        "hermes_cli.main._detect_venv_python_processes",
+        lambda: [fake_holders()[1]],
     )
     assert update_cmd._desktop_owns_gateway_lifecycle() is False

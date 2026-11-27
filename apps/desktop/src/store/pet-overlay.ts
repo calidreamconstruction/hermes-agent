@@ -1,9 +1,8 @@
 import { atom } from 'nanostores'
 
-import { PRIMARY_SESSION_VIEW } from '@/app/chat/session-view'
 import { persistBoolean, persistString, storedBoolean, storedString } from '@/lib/storage'
 import { $petActivity, $petInfo, $petUnread, clearPetUnread, type PetActivity, type PetInfo } from '@/store/pet'
-import { $petPluginMessages, type PetPluginMessage } from '@/store/pet-plugin-messages'
+import { $awaitingResponse, $busy } from '@/store/session'
 
 /**
  * Controller for the pop-out pet overlay (main-renderer side).
@@ -16,8 +15,8 @@ import { $petPluginMessages, type PetPluginMessage } from '@/store/pet-plugin-me
  * in, submit a composer message) via `onControl`.
  *
  * The overlay renders the same `PetSprite` / `PetBubble` as the in-window pet by
- * mirroring the reactive inputs of `$petState` (`$petInfo`, `$petActivity`, the
- * primary view's turn-busy and awaiting-response) into its own copies of those atoms — so the
+ * mirroring the four reactive inputs of `$petState` (`$petInfo`, `$petActivity`,
+ * `$busy`, `$awaitingResponse`) into its own copies of those atoms — so the
  * popped-out mascot is pixel-identical and needs zero bespoke render logic.
  */
 
@@ -49,8 +48,6 @@ export interface PetOverlayStatePayload {
   unread: boolean
   /** Latest reaction — bumping its id forwards a burst to the overlay. */
   reaction: PetReaction | null
-  /** Live plugin bubble lines (`ctx.pet.say`); this renderer owns their expiry. */
-  pluginMessages?: PetPluginMessage[]
 }
 
 export type PetOverlayControl =
@@ -147,11 +144,10 @@ function currentPayload(): PetOverlayStatePayload {
   return {
     info: $petInfo.get(),
     activity: $petActivity.get(),
-    busy: PRIMARY_SESSION_VIEW.$busy.get(),
-    awaiting: PRIMARY_SESSION_VIEW.$awaitingResponse.get(),
+    busy: $busy.get(),
+    awaiting: $awaitingResponse.get(),
     unread: $petUnread.get(),
-    reaction: $petReaction.get(),
-    pluginMessages: $petPluginMessages.get()
+    reaction: $petReaction.get()
   }
 }
 
@@ -185,11 +181,10 @@ function openOverlay(request: PetOverlayOpenRequest): void {
   stateUnsubs = [
     $petInfo.subscribe(pushNow),
     $petActivity.subscribe(pushNow),
-    PRIMARY_SESSION_VIEW.$busy.subscribe(pushNow),
-    PRIMARY_SESSION_VIEW.$awaitingResponse.subscribe(pushNow),
+    $busy.subscribe(pushNow),
+    $awaitingResponse.subscribe(pushNow),
     $petUnread.subscribe(pushNow),
-    $petReaction.subscribe(pushNow),
-    $petPluginMessages.subscribe(pushNow)
+    $petReaction.subscribe(pushNow)
   ]
 }
 

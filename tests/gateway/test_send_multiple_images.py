@@ -72,13 +72,12 @@ class _StubAdapter(BasePlatformAdapter):
 
 
 class TestBaseDefaultLoop:
-    def test_loops_per_image_by_default(self, tmp_path):
-        local = tmp_path / "foo.png"
+    def test_loops_per_image_by_default(self):
         a = _StubAdapter()
         images = [
             ("https://x.com/a.png", "alt 1"),
             ("https://x.com/b.png", "alt 2"),
-            (local.as_uri(), "local"),
+            ("file:///tmp/foo.png", "local"),
             ("https://x.com/c.gif", ""),
         ]
         _run(a.send_multiple_images("chat1", images))
@@ -86,10 +85,10 @@ class TestBaseDefaultLoop:
         assert len(a.sent_images) == 2
         assert len(a.sent_animations) == 1
         assert len(a.sent_files) == 1
-        assert a.sent_files[0][1] == str(local)
+        assert a.sent_files[0][1] == "/tmp/foo.png"
 
 
-from plugins.platforms.telegram.adapter import TelegramAdapter
+from plugins.platforms.telegram.adapter import TelegramAdapter  # noqa: E402
 
 
 class TestTelegramMultiImage:
@@ -146,7 +145,7 @@ def _ensure_discord_mock():
 
 _ensure_discord_mock()
 
-from plugins.platforms.discord.adapter import DiscordAdapter
+from plugins.platforms.discord.adapter import DiscordAdapter  # noqa: E402
 
 
 class TestDiscordMultiImage:
@@ -294,7 +293,7 @@ def _ensure_slack_mock():
 
 _ensure_slack_mock()
 
-from plugins.platforms.slack.adapter import SlackAdapter
+from plugins.platforms.slack.adapter import SlackAdapter  # noqa: E402
 
 
 class TestSlackMultiImage:
@@ -331,12 +330,13 @@ class TestSlackMultiImage:
 # ---------------------------------------------------------------------------
 
 
-from plugins.platforms.mattermost.adapter import MattermostAdapter
+from plugins.platforms.mattermost.adapter import MattermostAdapter  # noqa: E402
 
 
 class TestMattermostMultiImage:
     @pytest.fixture
     def adapter(self):
+        config = PlatformConfig(enabled=True, token="fake")
         # Minimal construction via object.__new__ to avoid full setup
         a = object.__new__(MattermostAdapter)
         a._base_url = "https://mm.example.com"
@@ -370,7 +370,7 @@ class TestMattermostMultiImage:
 # ---------------------------------------------------------------------------
 
 
-from plugins.platforms.email.adapter import EmailAdapter
+from plugins.platforms.email.adapter import EmailAdapter  # noqa: E402
 
 
 class TestEmailMultiImage:

@@ -3,7 +3,7 @@
 Timing out a git probe must not leave helper descendants (credential helpers,
 ``git-remote-https``, hook children) running after the probe returns. The
 probe spawns the child in its own process group (``process_group=0``) and
-``kill_process_tree`` signals the whole group with ``os.killpg`` — but
+``_kill_git_process_tree`` signals the whole group with ``os.killpg`` — but
 only when the child actually leads its own group, so a shared-group spawn can
 never take down unrelated processes.
 
@@ -20,9 +20,11 @@ import time
 import pytest
 
 from hermes_cli import _subprocess_compat
-from hermes_cli._subprocess_compat import bounded_git_probe, kill_process_tree
+from hermes_cli._subprocess_compat import _kill_git_process_tree, bounded_git_probe
 
-pytestmark = pytest.mark.platforms("posix")  # POSIX process-group semantics
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32", reason="POSIX process-group semantics"
+)
 
 
 def _write_forking_script(tmp_path, marker_name="child.pid"):
@@ -32,7 +34,7 @@ def _write_forking_script(tmp_path, marker_name="child.pid"):
     script.write_text(
         textwrap.dedent(
             f"""\
-            #!/usr/bin/env bash
+            #!/bin/bash
             sleep 300 &
             echo $! > {marker}
             sleep 300
@@ -82,7 +84,7 @@ def test_timeout_kills_descendants(tmp_path):
 def test_posix_spawn_uses_own_process_group(tmp_path):
     """The probe child must lead its own process group (killpg precondition)."""
     script = tmp_path / "pgid.sh"
-    script.write_text("#!/usr/bin/env bash\necho \"$$ $(ps -o pgid= -p $$ | tr -d ' ')\"\n")
+    script.write_text("#!/bin/bash\necho \"$$ $(ps -o pgid= -p $$ | tr -d ' ')\"\n")
     script.chmod(0o755)
 
     out = bounded_git_probe([str(script)], timeout=5.0)
@@ -92,7 +94,7 @@ def test_posix_spawn_uses_own_process_group(tmp_path):
 
 
 def test_group_kill_skipped_when_child_shares_our_group():
-    """kill_process_tree must never killpg a group the child doesn't lead.
+    """_kill_git_process_tree must never killpg a group the child doesn't lead.
 
     Spawn WITHOUT process_group=0 (child inherits OUR group): the ownership
     check (pgid == pid) must skip the group signal, or the test process itself
@@ -105,7 +107,7 @@ def test_group_kill_skipped_when_child_shares_our_group():
         stdin=subprocess.DEVNULL,
     )
     assert os.getpgid(proc.pid) == os.getpgid(0)  # shared group precondition
-    kill_process_tree(proc)
+    _kill_git_process_tree(proc)
     proc.wait(timeout=5)
     # We are alive to make this assertion — killpg on our own group would have
     # taken the test runner down. The direct child is still killed.
@@ -130,4 +132,4 @@ def test_kill_helper_swallow_all_failures():
         def kill(self):
             raise OSError("already reaped")
 
-    kill_process_tree(_Dead())  # must not raise
+    _kill_git_process_tree(_Dead())  # must not raise

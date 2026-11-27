@@ -41,11 +41,10 @@ describe('terminalSetup helpers', () => {
       getVSCodeStyleConfigDir(
         'Code',
         'win32',
-        // Explicit win32-style platform data; win32.join yields backslash separators.
-        { APPDATA: 'C:\\Users\\me\\AppData\\Roaming' } as NodeJS.ProcessEnv,
+        { APPDATA: 'C:/Users/me/AppData/Roaming' } as NodeJS.ProcessEnv,
         '/home/me'
       )
-    ).toBe('C:\\Users\\me\\AppData\\Roaming\\Code\\User')
+    ).toBe('C:/Users/me/AppData/Roaming/Code/User')
   })
 
   it('strips line comments from keybindings JSON', () => {
@@ -304,6 +303,7 @@ describe('configureTerminalKeybindings', () => {
     })
 
     expect(result.success).toBe(false)
+    expect(result.message).toContain('Failed to read')
     expect(writeFile).not.toHaveBeenCalled()
   })
 
@@ -332,6 +332,7 @@ describe('configureTerminalKeybindings', () => {
     })
 
     expect(result.success).toBe(false)
+    expect(result.message).toContain('local machine')
   })
 
   it('prompts for setup when bindings are missing and suppresses prompt when complete', async () => {
@@ -339,9 +340,7 @@ describe('configureTerminalKeybindings', () => {
     await expect(
       shouldPromptForTerminalSetup({
         env: { TERM_PROGRAM: 'vscode' } as NodeJS.ProcessEnv,
-        fileOps: { readFile: readMissing },
-        homeDir: '/tmp/fake-home',
-        platform: 'darwin'
+        fileOps: { readFile: readMissing }
       })
     ).resolves.toBe(true)
 
@@ -389,9 +388,7 @@ describe('configureTerminalKeybindings', () => {
     await expect(
       shouldPromptForTerminalSetup({
         env: { TERM_PROGRAM: 'vscode' } as NodeJS.ProcessEnv,
-        fileOps: { readFile: readComplete },
-        homeDir: '/tmp/fake-home',
-        platform: 'darwin'
+        fileOps: { readFile: readComplete }
       })
     ).resolves.toBe(false)
   })
@@ -451,9 +448,7 @@ describe('configureTerminalKeybindings', () => {
     await expect(
       shouldPromptForTerminalSetup({
         env: { TERM_PROGRAM: 'vscode' } as NodeJS.ProcessEnv,
-        fileOps: { readFile: readLegacy },
-        homeDir: '/tmp/fake-home',
-        platform: 'darwin'
+        fileOps: { readFile: readLegacy }
       })
     ).resolves.toBe(true)
   })
@@ -495,6 +490,7 @@ describe('configureTerminalKeybindings', () => {
 
     expect(result.success).toBe(true)
     expect(result.requiresRestart).toBe(true)
+    expect(result.message).toContain('migrated 3 legacy bindings to CSI u encoding')
     const written = writeFile.mock.calls[0]?.[1] as string
     const parsed = JSON.parse(written)
 

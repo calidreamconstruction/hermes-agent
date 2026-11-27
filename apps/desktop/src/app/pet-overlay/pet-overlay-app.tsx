@@ -6,10 +6,8 @@ import { PetBubble } from '@/components/pet/pet-bubble'
 import { PetSprite } from '@/components/pet/pet-sprite'
 import { type PetZoomAnchor, usePetZoomGesture } from '@/components/pet/use-pet-zoom-gesture'
 import { Mail } from '@/lib/icons'
-import { isSubmitEnter } from '@/lib/ime'
 import { $petActivity, $petInfo, setPetInfo } from '@/store/pet'
 import { overlayWindowSize } from '@/store/pet-overlay'
-import { mirrorPetPluginMessages } from '@/store/pet-plugin-messages'
 import { setAwaitingResponse, setBusy } from '@/store/session'
 
 // Fallbacks mirror pet-sprite's defaults; the gateway normally sends real values.
@@ -97,7 +95,6 @@ export function PetOverlayApp() {
       setBusy(Boolean(payload.busy))
       setAwaitingResponse(Boolean(payload.awaiting))
       setUnread(Boolean(payload.unread))
-      mirrorPetPluginMessages(payload.pluginMessages)
 
       // Play a reaction on a new id (ignore the first sync, which just primes it).
       const reaction = payload.reaction ?? null
@@ -393,7 +390,7 @@ export function PetOverlayApp() {
         <input
           onChange={e => setDraft(e.target.value)}
           onKeyDown={e => {
-            if (isSubmitEnter(e) && !e.shiftKey) {
+            if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
               send()
             } else if (e.key === 'Escape') {
@@ -471,6 +468,7 @@ export function PetOverlayApp() {
                 top: 0,
                 width: 24
               }}
+              title="Open in Hermes"
               type="button"
             >
               <Mail style={{ height: 13, width: 13 }} />
