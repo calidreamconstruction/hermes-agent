@@ -195,9 +195,14 @@ def _validate_explicit_toolsets(toolsets: object = None) -> tuple[list[str] | No
         return None, None
 
     mcp_names, mcp_disabled = _configured_mcp_servers() if unresolved else (set(), set())
-    mcp_valid = [name for name in unresolved if name in mcp_names]
-    disabled = [name for name in unresolved if name in mcp_disabled]
-    unknown = [name for name in unresolved if name not in mcp_names and name not in mcp_disabled]
+    mcp_aliases = {f'mcp-{name}' for name in mcp_names}
+    disabled_aliases = {f'mcp-{name}' for name in mcp_disabled}
+    mcp_valid = [name for name in unresolved
+                 if name in mcp_names or name in mcp_aliases or name == 'no_mcp']
+    disabled = [name for name in unresolved if name in mcp_disabled or name in disabled_aliases]
+    unknown = [name for name in unresolved
+               if name not in mcp_names and name not in mcp_aliases and name != 'no_mcp'
+               and name not in mcp_disabled and name not in disabled_aliases]
     valid = built_in + mcp_valid
 
     if unknown:

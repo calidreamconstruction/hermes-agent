@@ -159,6 +159,10 @@ def _title_language() -> str:
 
 
 def _auto_title_enabled() -> bool:
+    # Local voice one-shot interactions already have an owner-defined session identity.
+    # Avoid a background call to a second model (often Ollama on another port).
+    if __import__("os").environ.get("AZANI_VOICE_SKIP_AUTO_TITLE") == "1":
+        return False
     try:
         from utils import is_truthy_value
         return is_truthy_value(_title_config().get("enabled"), default=True)

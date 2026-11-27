@@ -353,6 +353,9 @@ def _reset_mcp_server_filter():
         ("all", None),
         (["*"], None),
         ("terminal,web", ["terminal", "web"]),
+        ("mcp-laya", ["laya"]),
+        ("terminal,mcp-code-mcp", ["terminal", "code-mcp"]),
+        ("no_mcp", ["no_mcp"]),
         (["terminal", "code-mcp,web"], ["terminal", "code-mcp", "web"]),
     ],
 )

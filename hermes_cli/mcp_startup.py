@@ -43,7 +43,8 @@ def set_mcp_server_filter(toolsets: object) -> Optional[list[str]]:
     if not names or "all" in names or "*" in names:
         _mcp_server_filter = None
     else:
-        _mcp_server_filter = names
+        # `mcp-<server>` is the public toolset alias; discovery takes bare server IDs.
+        _mcp_server_filter = [n[4:] if n.startswith('mcp-') and len(n) > 4 else n for n in names]
     return _mcp_server_filter
 
 
