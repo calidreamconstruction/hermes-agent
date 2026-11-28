@@ -1,6 +1,5 @@
 import { liveSessionProjectId } from '@/app/chat/sidebar/projects/workspace-groups'
 import { pathLeaf } from '@/lib/display-path'
-import { $projectOwnerBySessionId } from '@/store/projects'
 import type { ProjectInfo, SessionInfo } from '@/types/hermes'
 
 /**
@@ -27,7 +26,7 @@ import type { ProjectInfo, SessionInfo } from '@/types/hermes'
  * unplaced.
  */
 export function sessionProjectLabel(session: SessionInfo, projects: ProjectInfo[]): null | string {
-  const projectId = liveSessionProjectId(session, projects, $projectOwnerBySessionId.get())
+  const projectId = liveSessionProjectId(session, projects)
 
   if (projectId) {
     const explicit = projects.find(project => project.id === projectId)

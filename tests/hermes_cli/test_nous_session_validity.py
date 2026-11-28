@@ -4,8 +4,13 @@ import base64
 import json
 import time
 
-from hermes_cli import auth
-from hermes_cli import auth_nous
+import hermes_cli.auth as auth
+from hermes_cli.auth import (
+    NOUS_SESSION_TERMINAL,
+    NOUS_SESSION_UNKNOWN,
+    NOUS_SESSION_VALID,
+    get_nous_session_validity,
+)
 
 
 def _invoke_jwt(*, seconds: int = 3600) -> str:
@@ -36,11 +41,6 @@ def _block_live_auth(monkeypatch):
     monkeypatch.setattr(auth, "get_nous_auth_status", _fail_if_live_auth_is_used)
     monkeypatch.setattr(
         auth,
-        "resolve_nous_runtime_credentials",
-        _fail_if_live_auth_is_used,
-    )
-    monkeypatch.setattr(
-        auth_nous,
         "resolve_nous_runtime_credentials",
         _fail_if_live_auth_is_used,
     )

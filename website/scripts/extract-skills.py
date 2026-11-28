@@ -20,14 +20,12 @@ the unified index existed).
 
 import json
 import os
-import sys
 from collections import Counter
-from datetime import datetime, timezone, UTC
+from datetime import datetime, timezone
+
+import yaml
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, REPO_ROOT)
-import hermes_yaml as yaml
-
 LOCAL_SKILL_DIRS = [
     ("skills", "built-in"),
     ("optional-skills", "optional"),
@@ -227,7 +225,7 @@ def _source_url(source: str, identifier: str, extra: dict) -> str:
         # ClawHub URLs require the owner handle: https://clawhub.ai/{owner}/skills/{slug}.
         # Without the owner we cannot build a valid URL — return "" rather than
         # a broken link (the card will simply omit the "View source" button).
-        slug = identifier.removeprefix("clawhub/")
+        slug = identifier[len("clawhub/"):] if identifier.startswith("clawhub/") else identifier
         owner = extra.get("owner", "") if isinstance(extra, dict) else ""
         if owner:
             return f"https://clawhub.ai/{owner}/skills/{slug}"
@@ -235,16 +233,16 @@ def _source_url(source: str, identifier: str, extra: dict) -> str:
 
     if src in {"skills.sh", "skills-sh"}:
         # "skills-sh/owner/repo/skill" -> the skills.sh detail page
-        rest = identifier.removeprefix("skills-sh/")
+        rest = identifier[len("skills-sh/"):] if identifier.startswith("skills-sh/") else identifier
         return f"https://skills.sh/skills/{rest}"
 
     if src == "lobehub":
-        slug = identifier.removeprefix("lobehub/")
+        slug = identifier[len("lobehub/"):] if identifier.startswith("lobehub/") else identifier
         return f"https://lobehub.com/agent/{slug}"
 
     if src in {"browse.sh", "browse-sh"}:
         # "browse-sh/<hostname>/<task-id>" -> browse.sh task page
-        rest = identifier.removeprefix("browse-sh/")
+        rest = identifier[len("browse-sh/"):] if identifier.startswith("browse-sh/") else identifier
         return f"https://browse.sh/skills/{rest}"
 
     return ""
@@ -313,11 +311,6 @@ def extract_local_skills():
                 elif isinstance(cmds, str) and cmds.strip():
                     commands = [cmds.strip()]
 
-            rel_id = rel.replace(os.sep, "/")
-            install_identifier = (
-                f"official/{rel_id}" if source_label == "optional"
-                else f"NousResearch/hermes-agent/skills/{rel_id}"
-            )
             skills.append({
                 "name": fm.get("name", os.path.basename(root)),
                 "description": fm.get("description", ""),
@@ -333,8 +326,6 @@ def extract_local_skills():
                 "envVars": env_vars,
                 "commands": commands,
                 "docsPath": _docs_page_path(rel, source_label),
-                "installIdentifier": install_identifier,
-                "installCmd": f"hermes skills install {install_identifier}",
             })
 
     return skills
@@ -445,7 +436,6 @@ def extract_unified_index_skills():
             "docsPath": "",
             "identifier": identifier,
             "installCmd": install_cmd,
-            "installIdentifier": install_cmd.removeprefix("hermes skills install "),
             "sourceUrl": source_url,
         })
 
@@ -666,7 +656,7 @@ def main():
     # without changing the shape of skills.json.
     by_source = Counter(s["source"] for s in all_skills)
     meta = {
-        "extractedAt": datetime.now(UTC).isoformat(),
+        "extractedAt": datetime.now(timezone.utc).isoformat(),
         "totalSkills": len(all_skills),
         "localSkills": len(local),
         "externalSkills": len(external),

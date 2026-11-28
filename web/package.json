@@ -5,12 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node ../scripts/build/web.mjs",
+    "build": "tsc -b && vite build",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "fix": "npm run lint:fix",
     "preview": "vite preview",
-    "typecheck": "tsc -b . --noEmit",
+    "typecheck": "tsc -p . --noEmit",
     "test": "vitest run",
     "check": "npm run typecheck && npm run test && npm run lint"
   },

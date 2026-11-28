@@ -6,7 +6,6 @@ import { test } from 'vitest'
 
 import {
   collectRelaunchArgs,
-  describeUpdaterHandoffFailure,
   MARKER_SELF_ADOPT_EPOCH_MS,
   observeUpdaterHandoff,
   resolvePosixScriptHandoff,
@@ -219,10 +218,7 @@ test('resolveUpdateScriptHandoff is Windows-only (POSIX updates in place)', () =
   assert.equal(handoff, null)
 })
 
-test('wrapHandoffForDetachedConsole runs the script inside a non-detached hidden wrapper console', () => {
-  // #116161: `start /min` allocated a NEW (minimized, visible) console for
-  // powershell on every hand-off; `detached: true` (DETACHED_PROCESS) would
-  // leave the wrapper console-less, forcing the same allocation under `/b`.
+test('wrapHandoffForDetachedConsole routes through cmd start with own console', () => {
   const root = String.raw`C:\Users\hermes\AppData\Local\hermes\hermes-agent`
   const expected = path.join(root, 'scripts', 'desktop-update', 'windows.ps1')
 
@@ -235,14 +231,13 @@ test('wrapHandoffForDetachedConsole runs the script inside a non-detached hidden
   const wrapped = wrapHandoffForDetachedConsole(handoff, ['-InstallRoot', root, '-Branch', 'main'])
 
   assert.equal(wrapped.command, 'cmd.exe')
-  assert.equal(wrapped.detached, false)
   assert.deepEqual(wrapped.args, [
     '/d',
     '/s',
     '/c',
     'start',
     '',
-    '/b',
+    '/min',
     'powershell',
     '-NoProfile',
     '-ExecutionPolicy',
@@ -396,18 +391,6 @@ test('observeUpdaterHandoff reports a non-zero early exit', async () => {
   assert.equal(outcome.ok, false)
   assert.equal(outcome.reason, 'early-exit')
   assert.equal(outcome.code, 127)
-})
-
-test('describeUpdaterHandoffFailure leads with plain copy and confines the raw outcome to Details', () => {
-  for (const raw of ['updater exited 127 before the settle window elapsed', 'updater spawn failed: ENOENT']) {
-    const text = describeUpdaterHandoffFailure({ message: raw })
-    const [lead, details] = text.split('\n\nDetails: ')
-
-    assert.ok(lead && !lead.includes(raw))
-    assert.equal(details, raw)
-  }
-
-  assert.doesNotMatch(describeUpdaterHandoffFailure({}), /Details:/)
 })
 
 test('observeUpdaterHandoff reports a signal death inside the window', async () => {

@@ -90,6 +90,7 @@ def test_render_prompt_contains_instruction_and_interval():
     rendered = s.render_prompt()
     assert "check the deploy" in rendered
     assert "10m" in rendered
+    assert "Heartbeat" in rendered
 
 
 # ──────────────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-"""Gateway vision pre-process merges the analysis with the user text."""
+"""Gateway vision pre-process prompt should stay concise."""
 
 import json
 from unittest.mock import AsyncMock, patch
@@ -7,7 +7,7 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_enrich_message_with_vision_merges_analysis_without_output_cap():
+async def test_enrich_message_with_vision_uses_concise_prompt():
     from gateway.run import GatewayRunner
 
     runner = GatewayRunner.__new__(GatewayRunner)
@@ -24,6 +24,11 @@ async def test_enrich_message_with_vision_merges_analysis_without_output_cap():
 
     assert "A cat on a chair." in result
     assert "What is happening here?" in result
+    assert (
+        "Concisely describe this image in 2-4 sentences"
+        in mock_vision.await_args.kwargs["user_prompt"]
+    )
+    assert "Skip decorative details." in mock_vision.await_args.kwargs["user_prompt"]
     # No output cap is forwarded: per the max-tokens-knob policy the aux
     # client decides token handling; conciseness comes from the prompt.
     assert "max_tokens" not in mock_vision.await_args.kwargs

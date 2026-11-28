@@ -1,5 +1,4 @@
 import { Ansi, Box, NoSelect, Text } from '@hermes/ink'
-import { hasAnsi, sanitizeAnsiForRender, stripAnsi } from '@hermes/shared/ansi'
 import { memo, useState } from 'react'
 
 import { TERMUX_TUI_MODE } from '../config/env.js'
@@ -9,9 +8,15 @@ import { splitComposerHighlights } from '../domain/composerHighlights.js'
 import { sectionMode } from '../domain/details.js'
 import { userDisplay } from '../domain/messages.js'
 import { ROLE } from '../domain/roles.js'
-import { useT } from '../i18n/useT.js'
 import { transcriptBodyWidth, transcriptGutterWidth } from '../lib/inputMetrics.js'
-import { boundedLiveRenderText, compactPreview, isPasteBackedText } from '../lib/text.js'
+import {
+  boundedLiveRenderText,
+  compactPreview,
+  hasAnsi,
+  isPasteBackedText,
+  sanitizeAnsiForRender,
+  stripAnsi
+} from '../lib/text.js'
 import type { Theme } from '../theme.js'
 import type { ActiveTool, DetailsMode, Msg, SectionVisibility } from '../types.js'
 
@@ -58,8 +63,6 @@ export const MessageLine = memo(function MessageLine({
   timestamps = false,
   tools = []
 }: MessageLineProps) {
-  const T = useT().chatBits.messageLine
-
   // Per-section overrides win over the global mode, so resolve each section
   // we might consume here once and gate visibility on the *content-bearing*
   // sections only — never on the global mode.  A `trail` message feeds Tool
@@ -128,7 +131,7 @@ export const MessageLine = memo(function MessageLine({
     const maxChars = Math.max(24, cols - 14)
     const stripped = hasAnsi(msg.text) ? stripAnsi(msg.text) : msg.text
     const safeAnsi = hasAnsi(msg.text) ? sanitizeAnsiForRender(msg.text) : msg.text
-    const preview = compactPreview(stripped, maxChars) || T.emptyToolResult
+    const preview = compactPreview(stripped, maxChars) || '(empty tool result)'
 
     return (
       <Box alignSelf="flex-start" borderColor={t.color.muted} borderStyle="round" marginLeft={3} paddingX={1}>
@@ -179,7 +182,7 @@ export const MessageLine = memo(function MessageLine({
     // MUST come before the hasAnsi check — system messages from the backend
     // contain Rich markup escape codes that would otherwise hit <Ansi> full render.
     if (systemIsLong) {
-      const firstLine = (msg.text.split('\n')[0] ?? '').trim().slice(0, 120) || T.systemMessage
+      const firstLine = (msg.text.split('\n')[0] ?? '').trim().slice(0, 120) || '(system message)'
 
       return (
         <Box flexDirection="column">
@@ -188,7 +191,7 @@ export const MessageLine = memo(function MessageLine({
             <Text color={t.color.muted}>{firstLine}</Text>
             <Text color={t.color.muted} dimColor>
               {' — '}
-              {T.chars(msg.text.length.toLocaleString())}
+              {msg.text.length.toLocaleString()} chars
             </Text>
           </Box>
           {systemOpen && <Ansi>{sanitizeAnsiForRender(msg.text)}</Ansi>}
@@ -220,7 +223,7 @@ export const MessageLine = memo(function MessageLine({
         <Text color={body}>
           {head}
           <Text color={t.color.muted} dimColor>
-            {T.longMessage}
+            [long message]
           </Text>
           {rest.join('')}
         </Text>
@@ -291,7 +294,7 @@ export const MessageLine = memo(function MessageLine({
             <Text color={t.color.border}>└─ </Text>
           </NoSelect>
           <Text color={t.color.muted} dim>
-            {T.response}
+            Response
           </Text>
         </Box>
       )}

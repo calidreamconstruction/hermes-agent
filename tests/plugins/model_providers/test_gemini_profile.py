@@ -7,7 +7,7 @@ import pytest
 
 @pytest.fixture
 def gemini_profile():
-    import model_tools
+    import model_tools  # noqa: F401
     import providers
 
     profile = providers.get_provider_profile("gemini")

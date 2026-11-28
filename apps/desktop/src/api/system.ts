@@ -2,9 +2,7 @@ import type {
   ActionResponse,
   ActionStatusResponse,
   AudioSpeakResponse,
-  AudioSttLeaseResponse,
   AudioTranscriptionResponse,
-  AudioTtsLeaseResponse,
   BackendUpdateCheckResponse,
   CuratorStatusResponse,
   DebugShareResponse,
@@ -14,16 +12,7 @@ import type {
   MemoryStatusResponse
 } from '@/types/hermes'
 
-import {
-  capabilityScoped,
-  hermesApi,
-  hermesApiAs,
-  type OwnerScope,
-  ownerScoped,
-  type ProfileScope,
-  profileScoped,
-  type ResolvedOwner
-} from './client'
+import { capabilityScoped, hermesApi, type ProfileScope, profileScoped } from './client'
 
 export const AUDIO_SPEAK_MIN_REQUEST_TIMEOUT_MS = 180_000
 export const AUDIO_SPEAK_MAX_REQUEST_TIMEOUT_MS = 600_000
@@ -145,9 +134,9 @@ export function runCurator(): Promise<ActionResponse> {
   })
 }
 
-export function restartGateway(profile?: null | string): Promise<ActionResponse> {
+export function restartGateway(): Promise<ActionResponse> {
   return hermesApi<ActionResponse>({
-    ...profileScoped(profile),
+    ...profileScoped(),
     path: '/api/gateway/restart',
     method: 'POST'
   })
@@ -178,16 +167,11 @@ export function getActionStatus(name: string, lines = 200, profile?: ProfileScop
   })
 }
 
-/** `owner` = the recording's owner, resolved when the mic opened: the audio is
- *  decoded on the backend its STT warm-up targeted. Omitted → the active scope. */
-export function transcribeAudio(
-  dataUrl: string,
-  mimeType?: string,
-  owner?: ResolvedOwner
-): Promise<AudioTranscriptionResponse> {
-  const request = {
+export function transcribeAudio(dataUrl: string, mimeType?: string): Promise<AudioTranscriptionResponse> {
+  return hermesApi<AudioTranscriptionResponse>({
     path: '/api/audio/transcribe',
     method: 'POST',
+    ...profileScoped(),
     body: {
       data_url: dataUrl,
       mime_type: mimeType
@@ -196,18 +180,12 @@ export function transcribeAudio(
     // encoding finish. Remote providers and long clips regularly exceed the
     // default 15s Electron backend timeout.
     timeoutMs: audioTranscribeRequestTimeoutMs(dataUrl)
-  }
-
-  return owner
-    ? hermesApiAs<AudioTranscriptionResponse>(owner, request)
-    : hermesApi<AudioTranscriptionResponse>({ ...profileScoped(), ...request })
+  })
 }
 
-// `owner` = the speaking session's (connection, profile) — a Bot's own TTS
-// voice on its own gateway; omitted halves → the active scope.
-export function speakText(text: string, owner?: OwnerScope): Promise<AudioSpeakResponse> {
+export function speakText(text: string): Promise<AudioSpeakResponse> {
   return hermesApi<AudioSpeakResponse>({
-    ...ownerScoped(owner),
+    ...profileScoped(),
     path: '/api/audio/speak',
     method: 'POST',
     body: { text },
@@ -215,48 +193,6 @@ export function speakText(text: string, owner?: OwnerScope): Promise<AudioSpeakR
     // finish. Remote providers and large messages regularly exceed the
     // default 15s Electron backend timeout.
     timeoutMs: audioSpeakRequestTimeoutMs(text)
-  })
-}
-
-// Acquiring a lease pre-loads the configured TTS engine. For local engines
-// that is a model load and, on a fresh install, a voice download — well past
-// the default 15s Electron backend timeout.
-export const AUDIO_TTS_LEASE_REQUEST_TIMEOUT_MS = 180_000
-
-/**
- * Tell the backend a speech-output toggle flipped so it can warm the TTS engine
- * (`active: true`) or release it once no surface needs it (`active: false`).
- * `lease` names the toggle — `desktop:read-aloud`, `desktop:conversation`.
- */
-export function setTtsLease(lease: string, active: boolean): Promise<AudioTtsLeaseResponse> {
-  return hermesApi<AudioTtsLeaseResponse>({
-    ...profileScoped(),
-    path: '/api/audio/tts-lease',
-    method: 'POST',
-    body: { active, lease },
-    timeoutMs: AUDIO_TTS_LEASE_REQUEST_TIMEOUT_MS
-  })
-}
-
-// Same cold-start class as TTS: acquiring a lease pre-loads the local STT
-// model (first-use download + load), which on CPU-bound hosts can exceed the
-// transcription floor on its own (issue #105955). The desktop acquires when
-// the mic opens so the load happens while the user is still speaking.
-export const AUDIO_STT_LEASE_REQUEST_TIMEOUT_MS = 180_000
-
-/**
- * Tell the backend a voice-input session started (`active: true`) so it can
- * warm the STT engine, or ended (`active: false`) to drop the lease.
- * `lease` names the session — `desktop:voice-input:<renderer>`. `owner` is
- * the voice operation's owner, resolved once when it started, so a queued call
- * is never re-routed by a later gateway/profile switch.
- */
-export function setSttLease(lease: string, active: boolean, owner: ResolvedOwner): Promise<AudioSttLeaseResponse> {
-  return hermesApiAs<AudioSttLeaseResponse>(owner, {
-    path: '/api/audio/stt-lease',
-    method: 'POST',
-    body: { active, lease },
-    timeoutMs: AUDIO_STT_LEASE_REQUEST_TIMEOUT_MS
   })
 }
 
@@ -282,29 +218,18 @@ export function getGhAuthStatus(refresh = false): Promise<{ available: boolean; 
 // audit` / `hermes backup` / `hermes debug share` and the dashboard System
 // page). All except debug share are spawn-based background actions tailed via
 // getActionStatus().
-//
-// Every one carries the ambient profile: Electron pins the whole /api/ops
-// family to the shared primary backend (connection-config's
-// LOCAL_PRIMARY_SCOPED_ROUTES), so an unprofiled call acts on that backend's
-// LAUNCH profile — and debug share uploads a home's logs and config.
 // ---------------------------------------------------------------------------
 
 export function runDoctor(): Promise<ActionResponse> {
-  return hermesApi<ActionResponse>({ ...profileScoped(), path: '/api/ops/doctor', method: 'POST', body: {} })
+  return hermesApi<ActionResponse>({ path: '/api/ops/doctor', method: 'POST', body: {} })
 }
 
 export function runSecurityAudit(): Promise<ActionResponse> {
-  return hermesApi<ActionResponse>({
-    ...profileScoped(),
-    path: '/api/ops/security-audit',
-    method: 'POST',
-    body: {}
-  })
+  return hermesApi<ActionResponse>({ path: '/api/ops/security-audit', method: 'POST', body: {} })
 }
 
 export function runBackup(): Promise<ActionResponse & { archive?: string }> {
   return hermesApi<ActionResponse & { archive?: string }>({
-    ...profileScoped(),
     path: '/api/ops/backup',
     method: 'POST',
     body: {}
@@ -313,7 +238,6 @@ export function runBackup(): Promise<ActionResponse & { archive?: string }> {
 
 export function runDebugShare(): Promise<DebugShareResponse> {
   return hermesApi<DebugShareResponse>({
-    ...profileScoped(),
     path: '/api/ops/debug-share',
     method: 'POST',
     body: {},
