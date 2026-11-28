@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { test } from 'vitest'
 
 import {
+  bundledRuntimeImportCheck,
   detectRemoteDisplay,
   isWindowsBinaryPathInWsl,
   isWslEnvironment,
@@ -24,6 +25,12 @@ test('isWindowsBinaryPathInWsl blocks Windows binary types on WSL', () => {
   assert.equal(isWindowsBinaryPathInWsl('/mnt/c/Tools/install.ps1', { isWsl: true }), true)
   assert.equal(isWindowsBinaryPathInWsl('/usr/local/bin/hermes', { isWsl: true }), false)
   assert.equal(isWindowsBinaryPathInWsl('/mnt/c/Tools/hermes.exe', { isWsl: false }), false)
+})
+
+test('bundledRuntimeImportCheck selects platform-specific import checks', () => {
+  assert.equal(bundledRuntimeImportCheck('win32'), 'import fastapi, uvicorn, winpty')
+  assert.equal(bundledRuntimeImportCheck('darwin'), 'import fastapi, uvicorn, ptyprocess')
+  assert.equal(bundledRuntimeImportCheck('linux'), 'import fastapi, uvicorn, ptyprocess')
 })
 
 test('detectRemoteDisplay keeps GPU on for local sessions', () => {

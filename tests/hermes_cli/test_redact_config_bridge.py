@@ -64,7 +64,6 @@ def test_redact_secrets_false_in_config_yaml_is_honored(tmp_path):
         text=True,
         cwd=str(REPO_ROOT),
         timeout=30,
-        check=False,
     )
     assert result.returncode == 0, f"probe failed: {result.stderr}"
     assert "REDACT_ENABLED=False" in result.stdout, (
@@ -108,7 +107,6 @@ def test_redact_secrets_default_true_when_unset(tmp_path):
         text=True,
         cwd=str(REPO_ROOT),
         timeout=30,
-        check=False,
     )
     assert result.returncode == 0, f"probe failed: {result.stderr}"
     assert "REDACT_ENABLED=True" in result.stdout
@@ -154,7 +152,6 @@ def test_dotenv_redact_secrets_beats_config_yaml(tmp_path):
         text=True,
         cwd=str(REPO_ROOT),
         timeout=30,
-        check=False,
     )
     assert result.returncode == 0, f"probe failed: {result.stderr}"
     # .env value wins

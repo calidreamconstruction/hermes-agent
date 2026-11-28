@@ -47,7 +47,6 @@ def fake_telegram_sdk(monkeypatch):
             "Application",
             "CommandHandler",
             "CallbackQueryHandler",
-            "InlineQueryHandler",
             "MessageHandler",
             "TypeHandler",
             "HTTPXRequest",
@@ -70,7 +69,6 @@ def fake_telegram_sdk(monkeypatch):
         "Application",
         "CommandHandler",
         "CallbackQueryHandler",
-        "InlineQueryHandler",
         "MessageHandler",
         "TypeHandler",
     ):
@@ -103,12 +101,12 @@ def fake_telegram_sdk(monkeypatch):
 
 def test_lazy_install_rebinds_every_placeholder(monkeypatch, fake_telegram_sdk):
     """Every symbol the fallback stubbed must be rebound by the lazy install."""
-    from plugins.platforms.telegram import adapter
+    import plugins.platforms.telegram.adapter as adapter
 
-    import pm
+    from tools import lazy_deps
 
     # The package is already in sys.modules; installing it would be a no-op.
-    monkeypatch.setattr(pm, "ensure_import", lambda extra: None)
+    monkeypatch.setattr(lazy_deps, "ensure", lambda key, prompt=False: None)
 
     # Reconstruct the imported-before-installed state the fallback leaves behind.
     monkeypatch.setattr(adapter, "TELEGRAM_AVAILABLE", False)
@@ -121,7 +119,6 @@ def test_lazy_install_rebinds_every_placeholder(monkeypatch, fake_telegram_sdk):
         "Application",
         "CommandHandler",
         "CallbackQueryHandler",
-        "InlineQueryHandler",
         "TelegramMessageHandler",
         "TypeHandler",
         "ContextTypes",

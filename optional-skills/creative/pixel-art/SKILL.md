@@ -142,13 +142,12 @@ from pixel_art import pixel_art
 from pixel_art_video import pixel_art_video
 
 # 1. Convert to pixel art
-out = os.path.expanduser("~/.hermes/cache/scratch")
-pixel_art("/path/to/photo.jpg", f"{out}/pixel.png", preset="nes")
+pixel_art("/path/to/photo.jpg", "/tmp/pixel.png", preset="nes")
 
 # 2. Animate (optional)
 pixel_art_video(
-    f"{out}/pixel.png",
-    f"{out}/pixel.mp4",
+    "/tmp/pixel.png",
+    "/tmp/pixel.mp4",
     scene="night",
     duration=6,
     fps=15,

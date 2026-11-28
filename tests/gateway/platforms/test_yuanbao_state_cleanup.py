@@ -25,16 +25,12 @@ from gateway.platforms.yuanbao import MessageSender, YuanbaoAdapter
 # Helpers
 # ---------------------------------------------------------------------------
 
-class _SlowNotifierStub:
-    async def start(self, chat_id):
-        pass
-
-    def cancel(self, chat_id):
-        pass
-
-
 class _OutboundStub:
-    slow_notifier = _SlowNotifierStub()
+    async def start_slow_notifier(self, chat_id):  # noqa: ANN001
+        pass
+
+    def cancel_slow_notifier(self, chat_id):  # noqa: ANN001
+        pass
 
 
 def _bare_adapter():
@@ -57,7 +53,7 @@ def _run_turn(monkeypatch, adapter, event, session_key, during_turn=None):
     """Run the yuanbao _process_message_background wrapper with the base
     class processing stubbed out (optionally mutating state mid-turn)."""
 
-    async def _base_stub(self, ev, sk):
+    async def _base_stub(self, ev, sk):  # noqa: ANN001
         if during_turn is not None:
             during_turn()
 

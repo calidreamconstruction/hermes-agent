@@ -13,18 +13,11 @@ import { ContribBoundary, ContribRender } from '@/contrib/react/boundary'
 import { useContributions } from '@/contrib/react/use-contributions'
 import { $routeTiles, closeRouteTile, type RouteTile } from '@/store/route-tiles'
 
-import {
-  $routesVersion,
-  ARTIFACTS_ROUTE,
-  CAPABILITIES_ROUTE,
-  contributedRoutes,
-  MESSAGING_ROUTE,
-  ROUTES_AREA
-} from '../routes'
+import { ARTIFACTS_ROUTE, contributedRoutes, MESSAGING_ROUTE, ROUTES_AREA, SKILLS_ROUTE } from '../routes'
 
 import { paneMirror } from './pane-mirror'
 
-const CapabilitiesView = lazy(async () => ({ default: (await import('../capabilities')).CapabilitiesView }))
+const SkillsView = lazy(async () => ({ default: (await import('../skills')).SkillsView }))
 const MessagingView = lazy(async () => ({ default: (await import('../messaging')).MessagingView }))
 const ArtifactsView = lazy(async () => ({ default: (await import('../artifacts')).ArtifactsView }))
 
@@ -32,7 +25,7 @@ const ArtifactsView = lazy(async () => ({ default: (await import('../artifacts')
 const BUILTIN_PAGES: Record<string, { render: () => ReactNode; title: string }> = {
   [ARTIFACTS_ROUTE]: { render: () => <ArtifactsView />, title: 'Artifacts' },
   [MESSAGING_ROUTE]: { render: () => <MessagingView />, title: 'Messaging' },
-  [CAPABILITIES_ROUTE]: { render: () => <CapabilitiesView />, title: 'Capabilities' }
+  [SKILLS_ROUTE]: { render: () => <SkillsView />, title: 'Capabilities' }
 }
 
 /** Humanize a route path into a tab title: `/my-atlas` → `My Atlas`. */
@@ -54,14 +47,12 @@ function routeTitle(path: string): string {
   return contributedRoutes().find(r => r.path === path)?.title ?? humanizePath(path)
 }
 
-export function RouteTilePane({ path }: { path: string }) {
+function RouteTilePane({ path }: { path: string }) {
   const builtin = BUILTIN_PAGES[path]
 
   // Subscribe so a plugin page tile appears the moment its route registers.
-  // The snapshot feeds the lookup: under React Compiler an independently
-  // called contributedRoutes() can stay memoized across that registration.
-  const contributions = useContributions(ROUTES_AREA)
-  const contrib = builtin ? null : contributedRoutes(contributions).find(r => r.path === path)
+  useContributions(ROUTES_AREA)
+  const contrib = builtin ? null : contributedRoutes().find(r => r.path === path)
 
   if (builtin) {
     return (
@@ -95,9 +86,7 @@ export function RouteTilePane({ path }: { path: string }) {
 /** Keep pane contributions mirroring `$routeTiles`. Call once from the root. */
 export const watchRouteTiles = paneMirror<RouteTile>({
   source: $routeTiles,
-  // A tile restored before its plugin route registers must pick up the
-  // contribution's title once it lands, not keep the humanized-path fallback.
-  also: [$routesVersion],
+  workspaceMode: 'sessions',
   key: t => t.path,
   prefix: 'route-tile',
   dir: t => t.dir,

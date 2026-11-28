@@ -209,6 +209,7 @@ class TestTelegramColdStartCap:
             "cold-start Telegram budget must be shorter than the reconnect "
             f"budget (initial={initial}, full={full})"
         )
+        assert full == 180.0  # #67498 reconnect budget unchanged
         assert initial <= 60.0  # gateway reaches `running` within a minute
 
     def test_other_platforms_unchanged(self, tmp_path, monkeypatch):

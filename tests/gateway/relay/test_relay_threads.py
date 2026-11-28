@@ -360,7 +360,7 @@ def _mk_runner_stub():
         def __init__(self, adapter):
             self.adapters = {Platform.RELAY: adapter}
 
-        def _delivery_adapter_for(self, source):
+        def _adapter_for_source(self, source):
             return self.adapters.get(Platform.RELAY)
 
     return _Stub

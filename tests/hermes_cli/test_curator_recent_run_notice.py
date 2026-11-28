@@ -12,7 +12,7 @@ is the high-attention surface where consolidations should land.
 from __future__ import annotations
 
 import importlib
-from datetime import datetime, timedelta, timezone, UTC
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -31,12 +31,12 @@ def curator_env(tmp_path, monkeypatch, capsys):
     importlib.reload(hermes_constants)
     from agent import curator
     importlib.reload(curator)
-    from hermes_cli import update_cmd_maint
-    importlib.reload(update_cmd_maint)
+    from hermes_cli import main as hermes_main
+    importlib.reload(hermes_main)
 
     yield {
         "curator": curator,
-        "main": update_cmd_maint,
+        "main": hermes_main,
         "capsys": capsys,
     }
 
@@ -51,7 +51,7 @@ def _set_state(curator_mod, **fields):
 
 def test_silent_when_summary_is_single_line(curator_env):
     """No archives = no rename map = nothing to surface. But still stamps shown."""
-    now = datetime.now(UTC).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     _set_state(
         curator_env["curator"],
         last_run_at=now,
@@ -74,7 +74,7 @@ def test_silent_when_summary_is_single_line(curator_env):
 def test_format_time_ago_buckets(curator_env):
     """Smoke test the time formatter — drives the `last run Xh ago` line."""
     fmt = curator_env["main"]._format_time_ago
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     assert fmt((now - timedelta(seconds=10)).isoformat()) == "just now"
     assert fmt((now - timedelta(minutes=5)).isoformat()) == "5m ago"
     assert fmt((now - timedelta(hours=3)).isoformat()) == "3h ago"

@@ -9,14 +9,12 @@ import { SplitButton } from '@/components/ui/split-button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tip } from '@/components/ui/tooltip'
 import { useI18n } from '@/i18n'
-import { isSubmitEnter } from '@/lib/ime'
 import { formatCombo } from '@/lib/keybinds/combo'
 import { notifyError } from '@/store/notifications'
 import {
   $reviewCommitDefault,
   $reviewCommitMsgBusy,
   $reviewFiles,
-  $reviewScope,
   $reviewScopeTarget,
   $reviewShipBusy,
   $reviewShipInfo,
@@ -37,7 +35,6 @@ export function ReviewShipBar() {
   const { t } = useI18n()
   const c = t.statusStack.coding
   const files = useStore($reviewFiles)
-  const scope = useStore($reviewScope)
   const ship = useStore($reviewShipInfo)
   const scopeTarget = useStore($reviewScopeTarget)
   const busy = useStore($reviewShipBusy)
@@ -50,22 +47,8 @@ export function ReviewShipBar() {
   const canCommit = hasFiles && message.trim().length > 0 && !busy
   const canGenerate = hasFiles && !generating && !busy
 
-  // Commit / push / PR operate on the working tree, so they only make sense for
-  // the uncommitted scope — the branch / last-turn scopes are read-only views.
-  if (scope !== 'uncommitted') {
-    // Don't just vanish: say why. A user who reopened the pane on a persisted
-    // non-uncommitted scope would otherwise find no ship bar and no hint that
-    // it's a deliberate read-only view, not a broken pane.
-    return (
-      <div
-        className="shrink-0 px-2 pb-1.5 text-center text-[0.64rem] text-(--ui-text-tertiary)"
-        data-suppress-pane-reveal-side=""
-      >
-        {c.readOnlyScope}
-      </div>
-    )
-  }
-
+  // Nothing to commit → no ship bar at all; the pane just shows the tree /
+  // "No changes" state.
   if (!hasFiles) {
     return null
   }
@@ -102,7 +85,7 @@ export function ReviewShipBar() {
           disabled={generating}
           onChange={event => setMessage(event.target.value)}
           onKeyDown={event => {
-            if ((event.metaKey || event.ctrlKey) && isSubmitEnter(event)) {
+            if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
               event.preventDefault()
               runCommit(commitDefault)
             }

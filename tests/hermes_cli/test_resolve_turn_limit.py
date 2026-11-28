@@ -3,9 +3,10 @@
 
 Covers the full spelling table (int, float, numeric string, ``"none"``,
 ``"unlimited"``, ``"infinite"``, ``"-1"``, ``"0"``, YAML ``None``, bool,
-garbage) and the config→env bridge in the gateway and TUI resolvers.
+garbage) and the str→int env-var round-trip that the gateway bridge relies on.
 """
 import os
+import sys
 import pytest
 
 from hermes_cli.config import resolve_turn_limit, TURN_LIMIT_UNLIMITED
@@ -30,13 +31,16 @@ class TestNumericValues:
     def test_negative_int_is_unlimited(self):
         assert resolve_turn_limit(-5) == TURN_LIMIT_UNLIMITED
 
+    def test_negative_string_is_unlimited(self):
+        assert resolve_turn_limit("-1") == TURN_LIMIT_UNLIMITED
+        assert resolve_turn_limit("-42") == TURN_LIMIT_UNLIMITED
 
 
 class TestUnlimitedSpellings:
     @pytest.mark.parametrize("spelling", [
-        "none", "None", "NONE",
-        "unlimited",
-        "infinite",
+        "none", "None", "NONE", "nOnE",
+        "unlimited", "UNLIMITED", "Unlimited",
+        "infinite", "INFINITE",
         "∞",
         "-1", "0",
     ])
@@ -68,6 +72,9 @@ class TestAbsentAndDefault:
     def test_whitespace_only_returns_default(self):
         assert resolve_turn_limit("   ") == TURN_LIMIT_UNLIMITED
 
+    def test_absent_env_var_returns_default(self):
+        """Simulates os.getenv() returning None when HERMES_MAX_ITERATIONS unset."""
+        assert resolve_turn_limit(None) == TURN_LIMIT_UNLIMITED
 
 
 class TestInvalidInputs:
@@ -89,8 +96,42 @@ class TestInvalidInputs:
         assert resolve_turn_limit({"max_turns": 90}) == TURN_LIMIT_UNLIMITED
 
 
+class TestSentinelProperties:
+    def test_sentinel_is_sys_maxsize(self):
+        assert TURN_LIMIT_UNLIMITED == sys.maxsize
+
+    def test_sentinel_str_int_round_trip(self):
+        """The gateway bridge writes str(value) to HERMES_MAX_ITERATIONS,
+        then _current_max_iterations reads it back.  The sentinel must survive."""
+        s = str(TURN_LIMIT_UNLIMITED)
+        assert int(s) == TURN_LIMIT_UNLIMITED
+
+    def test_sentinel_greater_than_any_realistic_count(self):
+        assert TURN_LIMIT_UNLIMITED > 10_000_000
+        assert TURN_LIMIT_UNLIMITED > 1_000_000_000
 
 
+class TestEnvVarBridgeSimulation:
+    """Simulates the full gateway chain: config value → str() → env var →
+    resolve_turn_limit()."""
+
+    def test_none_string_round_trip(self):
+        # config has: agent.max_turns: "none"
+        env_val = str("none")
+        assert resolve_turn_limit(env_val) == TURN_LIMIT_UNLIMITED
+
+    def test_yaml_null_round_trip(self):
+        # YAML bare 'none' parses to Python None, str(None) = "None"
+        env_val = str(None)  # "None"
+        assert resolve_turn_limit(env_val) == TURN_LIMIT_UNLIMITED
+
+    def test_int_round_trip(self):
+        env_val = str(120)
+        assert resolve_turn_limit(env_val) == 120
+
+    def test_unlimited_string_round_trip(self):
+        env_val = str("unlimited")
+        assert resolve_turn_limit(env_val) == TURN_LIMIT_UNLIMITED
 
 
 class TestGatewayBridgeNullHandling:
@@ -100,6 +141,7 @@ class TestGatewayBridgeNullHandling:
 
     def test_none_value_not_bridged(self, monkeypatch, tmp_path):
         """YAML ``max_turns: null`` should not set HERMES_MAX_ITERATIONS."""
+        import yaml
         cfg_file = tmp_path / "config.yaml"
         cfg_file.write_text("agent:\n  max_turns: null\n", encoding="utf-8")
         monkeypatch.setenv("HERMES_MAX_ITERATIONS", "stale-120")
@@ -130,6 +172,7 @@ class TestGatewayBridgeNullHandling:
 
     def test_bare_key_treated_as_null(self, monkeypatch, tmp_path):
         """YAML ``max_turns:`` (bare key, no value) parses as Python None."""
+        import yaml
         cfg_file = tmp_path / "config.yaml"
         cfg_file.write_text("agent:\n  max_turns:\n", encoding="utf-8")
         monkeypatch.setenv("HERMES_MAX_ITERATIONS", "stale-90")
@@ -147,7 +190,15 @@ class TestTUIResolver:
         cfg = {"agent": {"max_turns": "none"}}
         assert _cfg_max_turns(cfg, default=25) == TURN_LIMIT_UNLIMITED
 
+    def test_int_zero_resolves_to_unlimited(self):
+        from tui_gateway.server import _cfg_max_turns
+        cfg = {"agent": {"max_turns": 0}}
+        assert _cfg_max_turns(cfg, default=25) == TURN_LIMIT_UNLIMITED
 
+    def test_string_unlimited_resolves_to_unlimited(self):
+        from tui_gateway.server import _cfg_max_turns
+        cfg = {"agent": {"max_turns": "unlimited"}}
+        assert _cfg_max_turns(cfg, default=25) == TURN_LIMIT_UNLIMITED
 
     def test_int_passthrough(self):
         from tui_gateway.server import _cfg_max_turns

@@ -38,4 +38,12 @@ describe('setPinnedSessionOrder', () => {
 
     expect($pinnedSessionIds.get()).toBe(before)
   })
+
+  it('keeps the same array reference when the order is unchanged', () => {
+    const before = ['a', 'b']
+    $pinnedSessionIds.set(before)
+    setPinnedSessionOrder(['a', 'b'])
+
+    expect($pinnedSessionIds.get()).toBe(before)
+  })
 })

@@ -13,6 +13,7 @@ import json
 
 import requests
 
+
 class _FakeResponse:
     def __init__(self, payload, *, status_code=200, text=None):
         self._payload = payload
@@ -28,6 +29,7 @@ class _FakeResponse:
     def json(self):
         return self._payload
 
+
 # ---------------------------------------------------------------------------
 # Original PR #10786 test coverage (HTTP shape, handle validation, citations,
 # retry behavior) — preserved verbatim. Uses XAI_API_KEY env var via the
@@ -36,7 +38,7 @@ class _FakeResponse:
 
 def test_x_search_posts_responses_request(monkeypatch):
     from tools.x_search_tool import x_search_tool
-    from hermes_cli.version_info import get_version_info
+    from hermes_cli import __version__
 
     captured = {}
 
@@ -67,8 +69,8 @@ def test_x_search_posts_responses_request(monkeypatch):
 
     tool_def = captured["json"]["tools"][0]
     assert captured["url"] == "https://api.x.ai/v1/responses"
-    assert captured["headers"]["User-Agent"] == f"Hermes-Agent/{get_version_info().base_version}"
-    assert captured["json"]["model"]
+    assert captured["headers"]["User-Agent"] == f"Hermes-Agent/{__version__}"
+    assert captured["json"]["model"] == "grok-4.5"
     assert captured["json"]["store"] is False
     assert "reasoning" not in captured["json"]
     assert tool_def["type"] == "x_search"
@@ -78,6 +80,7 @@ def test_x_search_posts_responses_request(monkeypatch):
     assert tool_def["enable_image_understanding"] is True
     assert result["success"] is True
     assert result["answer"] == "People on X are discussing xAI's latest launch."
+
 
 def test_x_search_rejects_conflicting_handle_filters(monkeypatch):
     from tools.x_search_tool import x_search_tool
@@ -92,8 +95,30 @@ def test_x_search_rejects_conflicting_handle_filters(monkeypatch):
         )
     )
 
-    assert result["error"]
-    assert not result.get("success")
+    assert result["error"] == "allowed_x_handles and excluded_x_handles cannot be used together"
+
+
+def test_x_search_schema_is_read_only_without_cross_tool_names():
+    """Static schema must state read-only scope without naming other surfaces.
+
+    AGENTS.md forbids hardcoding cross-tool/skill names in tool schemas because
+    those surfaces may be unavailable. Keep out-of-scope guidance generic here;
+    xurl routing lives in the skill and feature docs.
+    """
+    from tools.x_search_tool import X_SEARCH_SCHEMA
+
+    description = X_SEARCH_SCHEMA["description"]
+    lowered = description.lower()
+
+    assert "read-only" in lowered
+    assert "public x" in lowered
+    for action in ("post", "reply", "like", "dm", "upload media", "delete"):
+        assert action in lowered
+    assert "authenticated" in lowered
+    # No static cross-surface names in the model-facing schema.
+    assert "xurl" not in lowered
+    assert "web_search" not in lowered
+
 
 def test_x_search_extracts_inline_url_citations(monkeypatch):
     from tools.x_search_tool import x_search_tool
@@ -140,6 +165,7 @@ def test_x_search_extracts_inline_url_citations(monkeypatch):
         }
     ]
 
+
 def test_x_search_returns_structured_http_error(monkeypatch):
     from tools.x_search_tool import x_search_tool
 
@@ -169,6 +195,7 @@ def test_x_search_returns_structured_http_error(monkeypatch):
     assert result["error_type"] == "HTTPError"
     assert result["error"] == "forbidden: x_search is not enabled for this model"
 
+
 # ---------------------------------------------------------------------------
 # Credential-resolution coverage — the OAuth-or-API-key gating contract.
 # ---------------------------------------------------------------------------
@@ -177,6 +204,7 @@ def _no_xai_env(monkeypatch):
     """Strip any XAI_* env vars so the resolver doesn't see a leaked dev key."""
     for var in ("XAI_API_KEY", "XAI_BASE_URL", "HERMES_XAI_BASE_URL"):
         monkeypatch.delenv(var, raising=False)
+
 
 def test_x_search_uses_xai_oauth_when_only_oauth_available(monkeypatch):
     """OAuth-only user: credential_source should be ``xai-oauth``."""
@@ -213,6 +241,7 @@ def test_x_search_uses_xai_oauth_when_only_oauth_available(monkeypatch):
     assert result["credential_source"] == "xai-oauth"
     assert captured["headers"]["Authorization"] == "Bearer oauth-bearer-token"
 
+
 def test_x_search_returns_tool_error_when_no_credentials(monkeypatch):
     """No credentials anywhere: tool returns a clear error, not a 401 from xAI."""
     from tools.registry import invalidate_check_fn_cache
@@ -236,13 +265,31 @@ def test_x_search_returns_tool_error_when_no_credentials(monkeypatch):
 
     # If a model somehow invokes the tool despite a False check_fn, the call
     # surfaces a friendly error rather than an HTTP exception.
-    result = json.loads(x_search_tool(query="anything"))
-    assert result["error"]
+    result = x_search_tool(query="anything")
+    assert "No xAI credentials available" in result
+    assert "hermes auth add xai-oauth" in result
+
+
+# ---------------------------------------------------------------------------
+# Date validation — fail fast before burning an API call on a window that
+# cannot possibly return X posts. xAI itself happily 200s with a fluff
+# answer when the range is malformed or pure-future, which is hard for
+# callers to distinguish from a real result.
+# ---------------------------------------------------------------------------
+
+def _no_post_allowed(monkeypatch):
+    """Guard: any test that should fail before HTTP can hit this fence."""
+    def _fail(*_, **__):
+        raise AssertionError("requests.post must not be called — validation should reject first")
+
+    monkeypatch.setattr("requests.post", _fail)
+
 
 # ---------------------------------------------------------------------------
 # Degraded-result flag — distinguish citation-backed answers from
 # unsourced fluff when narrowing filters returned nothing.
 # ---------------------------------------------------------------------------
+
 
 def test_x_search_not_degraded_when_no_filters_active(monkeypatch):
     """A broad query that returns no citations isn't necessarily degraded.
@@ -265,9 +312,11 @@ def test_x_search_not_degraded_when_no_filters_active(monkeypatch):
     assert result["degraded"] is False
     assert result["degraded_reason"] is None
 
+
 def _xcred(prefix: str) -> str:
     """Synthesize a distinct fake credential value (never a bare literal)."""
     return prefix + "-key-" + "x1"
+
 
 def _install_fake_oauth_pool(monkeypatch, oauth_token: str) -> None:
     """Make the shared resolver's OAuth branch yield ``oauth_token``.
@@ -301,6 +350,7 @@ def _install_fake_oauth_pool(monkeypatch, oauth_token: str) -> None:
 
     monkeypatch.setattr("agent.credential_pool.load_pool", _fake_load_pool)
 
+
 def test_x_search_prefers_explicit_api_key_over_oauth(monkeypatch):
     """#88040: with a paid XAI_API_KEY configured alongside subscription
     OAuth, x_search must use the API key — the OAuth path authorizes but
@@ -315,7 +365,7 @@ def test_x_search_prefers_explicit_api_key_over_oauth(monkeypatch):
 
     monkeypatch.delenv("XAI_API_KEY", raising=False)
     monkeypatch.setattr(
-        "hermes_cli.config.get_env_value",
+        "tools.xai_http.get_env_value",
         lambda name, default=None: {
             "XAI_API_KEY": paid_key,
         }.get(name, default),
@@ -337,6 +387,7 @@ def test_x_search_prefers_explicit_api_key_over_oauth(monkeypatch):
     assert result["credential_source"] == "xai"
     assert captured["headers"]["Authorization"] == "Bearer " + paid_key
 
+
 def test_x_search_bearer_helper_falls_back_to_oauth_without_api_key(monkeypatch):
     """No explicit XAI_API_KEY: the OAuth resolver path is unchanged."""
     from tools.x_search_tool import _resolve_xai_bearer
@@ -345,7 +396,7 @@ def test_x_search_bearer_helper_falls_back_to_oauth_without_api_key(monkeypatch)
 
     monkeypatch.delenv("XAI_API_KEY", raising=False)
     monkeypatch.setattr(
-        "hermes_cli.config.get_env_value",
+        "tools.xai_http.get_env_value",
         lambda name, default=None: default,
     )
     _install_fake_oauth_pool(monkeypatch, oauth_token)
@@ -356,3 +407,28 @@ def test_x_search_bearer_helper_falls_back_to_oauth_without_api_key(monkeypatch)
         "https://api.x.ai/v1",
         "xai-oauth",
     )
+
+
+def test_x_search_bearer_requests_prefer_api_key_from_shared_resolver(monkeypatch):
+    """The x_search call site must opt into the shared resolver's
+    ``prefer_api_key`` precedence rather than re-implementing it inline."""
+    from tools.x_search_tool import _resolve_xai_bearer
+
+    captured = {}
+
+    def _fake_resolve(**kwargs):
+        captured.update(kwargs)
+        return {
+            "provider": "xai",
+            "api_key": _xcred("paid"),
+            "base_url": "https://api.x.ai/v1",
+        }
+
+    monkeypatch.setattr(
+        "tools.x_search_tool.resolve_xai_http_credentials", _fake_resolve
+    )
+
+    _api_key, _base_url, source = _resolve_xai_bearer()
+    assert captured.get("prefer_api_key") is True
+    assert source == "xai"
+
